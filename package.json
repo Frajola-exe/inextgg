@@ -11,13 +11,15 @@
     "build": "node scripts/run-framework.mjs build",
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "test": "node --import ./tests/register-runtime.mjs --test tests/commerce.test.mjs tests/appmax.test.mjs tests/appmax-routes.test.mjs",
-    "db:generate": "drizzle-kit generate"
+    "test": "node --import ./tests/register-runtime.mjs --test tests/commerce.test.mjs tests/appmax.test.mjs tests/appmax-routes.test.mjs tests/d1-http.test.mjs tests/vercel-auth.test.mjs",
+    "db:generate": "drizzle-kit generate",
+    "build:vercel": "vite build --config vite.vercel.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@hookform/resolvers": "^5.7.1",
     "@shadcn/react": "^0.3.0",
+    "@vercel/functions": "^3.10.1",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "^1.1.1",
@@ -53,6 +55,7 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.4",
     "json-rpc-2.0": "1.7.1",
+    "nitro": "^3.0.260903-beta",
     "raw-body": "3.0.2",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",

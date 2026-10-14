@@ -62,3 +62,44 @@ Os testes usam Node 24/SQLite em memória e cobrem disputa pela última key, res
 Cadastre produtos e estoque reais, confira os direitos de distribuição das keys e as imagens usadas, configure dados comerciais e políticas de atendimento/privacidade, disponibilize o instalador oficial e homologue o Pix. As imagens remotas de jogos são demonstrativas. Os resultados do dashboard usam pagamentos aprovados e excluem reembolsados/contestados, com limite de 5.000 pedidos mais recentes. A página inicial não exibe avaliações ou estatísticas fictícias.
 
 Documentação do provedor: https://docs.appmax.com.br/api-reference/payments/pix e https://docs.appmax.com.br/guides/webhooks
+
+## Deploy na Vercel
+
+O arquivo `vercel.json` desativa a deteccao automatica de Next.js e executa
+`npm run build:vercel`. A configuracao `vite.vercel.config.ts` usa Vinext + Nitro
+com o preset `vercel`, que gera o Build Output API em `.vercel/output`.
+Nao e necessario gerar `.next/routes-manifest.json`.
+
+Na Vercel, importe este repositorio e remova overrides antigos de Build Command
+ou Output Directory (especialmente `.next` e `dist/client`). O build e definido
+pelo `vercel.json`; nao selecione o preset Next.js. O Nitro gera o servidor e os
+assets para a Vercel. O build padrao `npm run build` e o `vite.config.ts` continuam
+sendo usados pela hospedagem Sites/Cloudflare.
+
+Para acessar o mesmo banco D1 pela Vercel, configure somente no servidor:
+
+- `CLOUDFLARE_ACCOUNT_ID`: ID da conta Cloudflare.
+- `CLOUDFLARE_D1_DATABASE_ID`: ID do banco existente, com as migracoes aplicadas.
+- `CLOUDFLARE_D1_API_TOKEN`: token Cloudflare com permissao D1 Edit para essa conta.
+- As variaveis Appmax, `ADMIN_EMAILS` e `SITE_URL` descritas acima.
+
+O adaptador `lib/d1-http.mjs` envia cada batch em uma unica chamada ao D1, sem
+repetir escritas automaticamente. Os webhooks usam `waitUntil` da Vercel.
+O deploy nao cria nem migra bancos automaticamente.
+
+### Limite de autenticacao na Vercel
+
+O login ChatGPT existente pertence a hospedagem Sites e nao e fornecido pela
+Vercel. Nessa hospedagem, `getChatGPTUser()` retorna `null` para impedir que um
+visitante forje os headers de identidade. A vitrine/API publica pode acessar D1
+apos configurar as variaveis, mas checkout, pedidos e administracao exigem integrar
+um provedor de autenticacao com sessao verificada no servidor. Adicionar apenas
+`ADMIN_EMAILS` nao habilita login. A autenticacao na hospedagem Sites e preservada.
+
+Validacao local:
+
+```sh
+npm run build:vercel
+node --test tests/d1-http.test.mjs
+npm test
+```
