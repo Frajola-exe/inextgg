@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1791831910220,
+      "tag": "0000_wealthy_the_renegades",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791910457216,
+      "tag": "0001_melted_firestar",
+      "breakpoints": true
+    }
+  ]
+}
