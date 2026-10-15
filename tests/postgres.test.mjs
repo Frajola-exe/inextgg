@@ -1,0 +1,87 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import pg from 'pg';
+import { createDatabase } from '../lib/postgres-adapter.mjs';
+import { reservationStatements } from '../lib/inventory.ts';
+
+test('Vercel lazily reads DATABASE_URL and reuses its PostgreSQL pool', async () => {
+  const { env } = await import('../lib/vercel-workers.mjs');
+  const previous = process.env.DATABASE_URL;
+  const OriginalPool = pg.Pool;
+  const options = [];
+  pg.Pool = class { constructor(config) { options.push(config); } on() {} };
+  try {
+    delete process.env.DATABASE_URL;
+    assert.throws(() => env.DB, /Configure DATABASE_URL/);
+    process.env.DATABASE_URL = 'postgresql://postgres:example@localhost:6543/postgres';
+    const database = env.DB;
+    assert.equal(env.DB, database);
+    assert.equal(options.length, 1);
+    assert.equal(options[0].connectionString, process.env.DATABASE_URL);
+    assert.equal(options[0].ssl.rejectUnauthorized, true);
+    assert.equal(options[0].max, 3);
+  } finally {
+    pg.Pool = OriginalPool;
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
+});
+
+test('PostgreSQL supports catalog, Appmax reservation, rollback and payment updates', async () => {
+  const engine = new PGlite();
+  async function query(input) {
+    const sql = typeof input === 'string' ? input : input.text;
+    // PGlite has a single connection; lock acquisition is covered by adapter tests.
+    if (sql.startsWith('SELECT pg_advisory_xact_lock')) return { rows: [], fields: [], rowCount: 0 };
+    const result = await engine.query(sql, input.values ?? []);
+    return { ...result, rowCount: result.affectedRows ?? result.rows.length };
+  }
+  const db = createDatabase({ query, connect: async () => ({ query, release() {} }) });
+  try {
+    await engine.exec('CREATE ROLE anon; CREATE ROLE authenticated;');
+    await engine.exec(await readFile(new URL('../db/postgresql.sql', import.meta.url), 'utf8'));
+    const tables = await engine.query("SELECT rowsecurity FROM pg_tables WHERE schemaname='public'");
+    assert.equal(tables.rows.length, 5);
+    assert.ok(tables.rows.every(row => row.rowsecurity));
+    await db.prepare('INSERT INTO products(id,name,category,description,image,price) VALUES(?,?,?,?,?,?)')
+      .bind('p', 'Game', 'Steam', '', '', 1000).run();
+    await db.prepare('INSERT INTO keys(id,product_id,code) VALUES(?,?,?)').bind('k', 'p', '00123').run();
+    globalThis.__appmaxTestEnv = { DB: db };
+    globalThis.__appmaxTestUser = null;
+    const store = await import('../app/api/store/route.ts');
+    const response = await store.GET();
+    assert.equal(response.status, 200);
+    const catalog = await response.json();
+    assert.equal(catalog.products[0].stock, 1);
+    assert.equal(catalog.demo, false);
+    const reserve = (id, quantity = 1) => db.batch(reservationStatements({
+      id, userId: 'u', email: 'buyer@example.com', requestKey: id, createdAt: 1791936000000,
+      items: [{ id: 'p', name: 'Game', price: 1000, quantity, automatic: 1 }],
+    }).map(s => db.prepare(s.sql).bind(...s.values)));
+    await reserve('insufficient', 2);
+    assert.equal(await db.prepare('SELECT * FROM orders').first(), null);
+    await reserve('first');
+    await reserve('second');
+    assert.equal(await db.prepare('SELECT COUNT(*) n FROM orders').first('n'), 1);
+    const order = await db.prepare('SELECT * FROM orders').first();
+    assert.equal(order.created_at, 1791936000000);
+    assert.equal(order.payment_provider, 'appmax');
+    assert.equal(order.payment_state, 'idle');
+    const claim = await db.prepare("UPDATE orders SET payment_state='processing' WHERE id=? AND payment_state='idle'").bind('first').run();
+    assert.equal(claim.meta.changes, 1);
+    assert.equal((await db.prepare("UPDATE orders SET payment_state='processing' WHERE id=? AND payment_state='idle'").bind('first').run()).meta.changes, 0);
+    await db.prepare("UPDATE orders SET pix_expires_at=? WHERE id=?").bind(1791936600000, 'first').run();
+    assert.equal(await db.prepare('SELECT pix_expires_at FROM orders').first('pix_expires_at'), 1791936600000);
+    for (const time of [10, 20]) await db.prepare('INSERT INTO appmax_webhook_jobs(order_id,received_at) VALUES(?,?) ON CONFLICT(order_id) DO UPDATE SET received_at=excluded.received_at').bind('first', time).run();
+    assert.equal(await db.prepare('SELECT received_at FROM appmax_webhook_jobs').first('received_at'), 20);
+    await assert.rejects(db.batch([
+      db.prepare('INSERT INTO keys(id,product_id,code) VALUES(?,?,?)').bind('new', 'p', 'NEW'),
+      db.prepare('INSERT INTO keys(id,product_id,code) VALUES(?,?,?)').bind('duplicate', 'p', '00123'),
+    ]));
+    assert.equal(await db.prepare('SELECT * FROM keys WHERE id=?').bind('new').first(), null);
+    await db.prepare("INSERT INTO settings(id,value) VALUES('store',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind('{"automatic":true}').run();
+    assert.deepEqual(JSON.parse(await db.prepare("SELECT value FROM settings WHERE id='store'").first('value')), { automatic: true });
+  } finally { await engine.close(); }
+});

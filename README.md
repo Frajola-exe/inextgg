@@ -32,6 +32,28 @@ Entrega automática exige a opção global e a opção do produto. Entrega manua
 
 ## Desenvolvimento
 
+### PostgreSQL / Supabase na Vercel
+
+O build `npm run build:vercel` conecta as rotas ao PostgreSQL pelo módulo
+`lib/postgres.mjs`. Configure `DATABASE_URL` nas variáveis protegidas do servidor
+da Vercel com a URI do Supabase Transaction pooler (porta 6543), senha codificada
+na URI e TLS com certificado válido. Use `.env.example` como referência.
+A conexão é criada na primeira requisição e o pool é reutilizado. Não use prefixo
+`NEXT_PUBLIC_` para a conexão nem coloque a senha no código.
+
+Para um banco novo e vazio, execute `db/postgresql.sql` uma única vez no SQL Editor
+do Supabase. Se já executou `postgres-migration/supabase-setup.sql`, as tabelas já
+estão criadas: não execute os dois arquivos. O esquema inclui os campos Appmax e
+RLS; as operações passam pelo servidor com a conexão PostgreSQL autorizada.
+As reservas usam transações e uma trava compartilhada entre instâncias do servidor.
+Essa trava serializa as gravações e pode limitar o volume de pedidos simultâneos.
+
+Depois de configurar a variável e publicar este código, faça um novo deploy na
+Vercel e confira `/api/store`. As credenciais D1 da Cloudflare não são usadas
+nesse build. O build Sites/Cloudflare continua usando seu binding D1 original.
+A configuração de autenticação na Vercel ainda exige um provedor com sessão
+validada; a conexão ao banco por si só não habilita login ou administração.
+
 ```sh
 npm run install:ci
 npm run db:generate
