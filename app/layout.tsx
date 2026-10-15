@@ -5,8 +5,8 @@ export const metadata: Metadata = {
   title: "INEXT | Sua próxima partida começa aqui",
   description: "Keys digitais para Steam, Xbox e PlayStation. Conheça seu próximo jogo na INEXT.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/favicon.svg?v=inext-2",
+    shortcut: "/favicon.svg?v=inext-2",
   },
 };
 
