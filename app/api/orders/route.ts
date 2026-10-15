@@ -4,6 +4,7 @@ import { pixInstructions } from "../../../lib/payment";
 import { checkoutSchema } from "../../../lib/checkout";
 import { reservationStatements } from "../../../lib/inventory";
 export async function GET(request:Request) {
+ 
  try {
   const user=await identity(), id=new URL(request.url).searchParams.get("id");
   if(!id) {const orders=await db().prepare("SELECT id,items,total,status,created_at,delivered_at FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(user.userId).all(); return Response.json(orders.results);}
