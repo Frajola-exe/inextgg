@@ -11,7 +11,7 @@ export async function GET() {
   }
   const products=await db().prepare("SELECT p.*, (SELECT COUNT(*) FROM keys k WHERE k.product_id=p.id AND k.order_id IS NULL) stock FROM products p WHERE deleted=0").all();
   const orders=await db().prepare("SELECT id,email,items,total,status,created_at,paid_at,delivered_at FROM orders ORDER BY created_at DESC LIMIT 5000").all();
-  return Response.json({products:products.results,orders:orders.results,settings:await config(),email:user.email,pixReady:pixReady()});
+  return Response.json({products:products.results,orders:orders.results,settings:await config(),email:user.email,provider:user.userId.startsWith("supabase:")?"supabase":"sites",pixReady:pixReady()},{headers:{"Cache-Control":"private, no-store"}});
  }catch(e){return failure(e);}
 }
 export async function POST(request:Request) {

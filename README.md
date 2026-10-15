@@ -10,7 +10,7 @@ React 19 + TypeScript, Vinext (API compatível com Next.js), Cloudflare Workers,
 
 A publicação inicial é privada, para revisão do proprietário. O catálogo exibe exclusivamente produtos ativos cadastrados no banco. Se não houver produtos, a vitrine mostra uma mensagem de catálogo vazio. Cadastre edição, região, descrição, preço e keys reais antes de ativá-los.
 
-O administrador da publicação é a conta proprietária configurada em `ADMIN_EMAILS`. Na hospedagem Sites, o login é gerenciado pela plataforma; em desenvolvimento local o starter simula `seedy@sites.test`. Nenhuma senha padrão é criada. A vitrine exige login para finalizar e consultar pedidos. Para usar outra hospedagem/autenticação, adapte `app/chatgpt-auth.ts` e o controle de acesso; headers de identidade nunca devem ser aceitos diretamente em um servidor público sem o proxy confiável da plataforma.
+O administrador da publicação é a conta proprietária configurada em `ADMIN_EMAILS`. Na hospedagem Sites, o login é gerenciado pela plataforma; em desenvolvimento local o starter simula `seedy@sites.test`. Nenhuma senha padrão é criada. A vitrine exige login para finalizar e consultar pedidos. Na Vercel, login e cadastro usam Supabase Auth, conforme a seção de configuração abaixo. Headers de identidade Sites nunca são aceitos diretamente nessa hospedagem.
 
 ## Ativar Pix Appmax
 
@@ -116,14 +116,54 @@ O adaptador `lib/d1-http.mjs` envia cada batch em uma unica chamada ao D1, sem
 repetir escritas automaticamente. Os webhooks usam `waitUntil` da Vercel.
 O deploy nao cria nem migra bancos automaticamente.
 
-### Limite de autenticacao na Vercel
+### Login e cadastro com Supabase Auth
 
-O login ChatGPT existente pertence a hospedagem Sites e nao e fornecido pela
-Vercel. Nessa hospedagem, `getChatGPTUser()` retorna `null` para impedir que um
-visitante forje os headers de identidade. A vitrine/API publica pode acessar D1
-apos configurar as variaveis, mas checkout, pedidos e administracao exigem integrar
-um provedor de autenticacao com sessao verificada no servidor. Adicionar apenas
-`ADMIN_EMAILS` nao habilita login. A autenticacao na hospedagem Sites e preservada.
+A loja tem `/entrar` e `/cadastro`, com nome, e-mail, senha e confirmação de senha.
+O cadastro envia a confirmação de e-mail pelo Supabase; após confirmar, o cliente
+entra com e-mail e senha. O header mostra Entrar/Criar conta para visitantes e Sair
+para usuários autenticados. O botão Painel admin aparece somente quando o servidor
+confirma que a conta está em `ADMIN_EMAILS`. O rodapé não contém acesso ao painel.
+
+Configure na hospedagem (ou em `.env` para Vercel local / `.dev.vars` para Sites local):
+
+- `SUPABASE_URL`: URL HTTPS do projeto, por exemplo `https://SEU-PROJETO.supabase.co`.
+- `SUPABASE_ANON_KEY`: chave publishable (`sb_publishable_...`) ou chave anon do
+  mesmo projeto. Não use a chave `service_role` nem a chave secret.
+- `SITE_URL`: origem HTTPS da loja publicada, sem caminho.
+- `ADMIN_EMAILS`: e-mails administrativos separados por vírgula. Cadastre e confirme
+  a conta correspondente antes de tentar entrar no painel.
+
+No painel Supabase:
+
+1. Em Authentication / Sign In / Providers, habilite Email e **Confirm email**.
+   Mantenha a confirmação habilitada: a permissão admin depende de um e-mail
+   verificado pelo provedor. Não permita que visitantes escolham os administradores.
+2. Em Authentication / URL Configuration, use a origem da loja como Site URL e
+   adicione `https://SEU-DOMINIO/entrar` à lista Redirect URLs. No desenvolvimento,
+   adicione também `http://localhost:5173/entrar` se essa for a porta utilizada.
+3. Preserve o link padrão `{{ .ConfirmationURL }}` no template Confirm signup.
+   O usuário confirma o e-mail e retorna a `/entrar`. Os tokens do fragmento da URL
+   são descartados; o login por senha cria a sessão em cookies HttpOnly.
+4. Configure SMTP próprio em Authentication / Email para enviar confirmações aos
+   clientes. O envio padrão do Supabase é limitado e não serve à abertura pública.
+5. Configure a política de senha para ao menos 12 caracteres e mantenha os limites
+   de tentativas do Supabase ativos. A tela de cadastro também exige 12 caracteres.
+
+Não é necessária migração das tabelas de comércio: as contas ficam no Supabase Auth.
+Pedidos novos usam o ID estável `supabase:<id>`; contas Sites e Supabase têm IDs
+separados. Pedidos antigos da conta ChatGPT continuam ligados àquela identidade e
+não são transferidos por coincidência de e-mail.
+
+Os tokens de acesso e renovação são mantidos somente em cookies HttpOnly, SameSite=Lax
+(e Secure em produção), com renovação validada no servidor. Login, cadastro e saída
+exigem a origem da loja; o navegador não recebe tokens no JSON. O Supabase valida
+a sessão pelo endpoint `/user`; permissões em `user_metadata` são ignoradas.
+
+A integração de identidade Sites foi preservada (Entrar com ChatGPT na hospedagem
+Sites). Na Vercel, headers Sites continuam sendo ignorados: a autenticação depende
+do Supabase. Sem as variáveis acima, o formulário informa indisponibilidade e não
+cria sessões. A configuração do provedor e o envio real de e-mails precisam ser
+validados na hospedagem antes de abrir a loja.
 
 Validacao local:
 

@@ -11,7 +11,7 @@
     "build": "node scripts/run-framework.mjs build",
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "test": "node --import ./tests/register-runtime.mjs --test tests/commerce.test.mjs tests/appmax.test.mjs tests/appmax-routes.test.mjs tests/d1-http.test.mjs tests/vercel-auth.test.mjs tests/postgres-adapter.test.mjs tests/postgres.test.mjs",
+    "test": "node --import ./tests/register-runtime.mjs --test tests/commerce.test.mjs tests/appmax.test.mjs tests/appmax-routes.test.mjs tests/d1-http.test.mjs tests/vercel-auth.test.mjs tests/auth.test.mjs tests/postgres-adapter.test.mjs tests/postgres.test.mjs",
     "db:generate": "drizzle-kit generate",
     "build:vercel": "vite build --config vite.vercel.config.ts"
   },
