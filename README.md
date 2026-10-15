@@ -20,7 +20,7 @@ A loja usa exclusivamente a API da Appmax. O servidor autentica com credenciais 
 2. Configure as variáveis protegidas de runtime: `APPMAX_CLIENT_ID`, `APPMAX_CLIENT_SECRET` (secret), `APPMAX_EXTERNAL_ID` e `APPMAX_ENVIRONMENT` (`sandbox` ou `production`). Configure também `ADMIN_EMAILS` e `SITE_URL` com a origem HTTPS da loja. Nenhuma credencial secreta vai para o navegador.
 3. Cadastre a URL de webhook `https://SEU-DOMINIO/api/webhooks/pix` na Appmax e habilite os eventos de pedido, incluindo Pix criado, pago, expirado, aprovado, integrado, estorno e chargeback. A URL precisa estar acessível externamente. A audiência atual da loja é restrita; ela precisa ser alterada pelo proprietário antes da homologação de webhooks externos.
 4. Publique para aplicar as variáveis. Homologue geração, consulta, aprovação, expiração e estorno no sandbox com as credenciais da Appmax antes de selecionar `production`.
-5. Configure WhatsApp e URL HTTPS do instalador em Administração → Configurações. O Discord fornecido já é o padrão.
+5. Configure o WhatsApp em Administração → Configurações. O Discord fornecido já é o padrão.
 
 O QR Code, o código copia e cola e a expiração vêm da Appmax; a duração não é fixada no site. As datas sem offset retornadas pelo provedor são interpretadas no fuso de Brasília. O servidor consulta `GET /v1/orders/{order_id}` e valida ID do pedido, cliente, email, método Pix, composição do valor e total pago antes de confirmar a entrega. O corpo de um webhook nunca confirma pagamento sozinho: a Appmax não envia assinatura HMAC. A notificação apenas agenda uma consulta autenticada à API, com trabalho persistido no banco antes da resposta HTTP 200. Falhas permanecem na tabela `appmax_webhook_jobs` e podem ser retomadas pela consulta do comprador ou por Pedidos → Consultar provedor.
 
@@ -88,7 +88,7 @@ Os testes usam Node 24/SQLite em memória e cobrem disputa pela última key, res
 
 ## Antes da abertura comercial
 
-Cadastre produtos e estoque reais, confira os direitos de distribuição das keys e as imagens usadas, configure dados comerciais e políticas de atendimento/privacidade, disponibilize o instalador oficial e homologue o Pix. Os resultados do dashboard usam pagamentos aprovados e excluem reembolsados/contestados, com limite de 5.000 pedidos mais recentes. A página inicial não exibe avaliações ou estatísticas fictícias.
+Cadastre produtos e estoque reais, confira os direitos de distribuição das keys e as imagens usadas, configure dados comerciais e políticas de atendimento/privacidade, homologue o Pix. Os resultados do dashboard usam pagamentos aprovados e excluem reembolsados/contestados, com limite de 5.000 pedidos mais recentes. A página inicial não exibe avaliações ou estatísticas fictícias.
 
 Documentação do provedor: https://docs.appmax.com.br/api-reference/payments/pix e https://docs.appmax.com.br/guides/webhooks
 

@@ -13,7 +13,8 @@ export function sameOrigin(request:Request) { if(request.headers.get("origin") !
 export function failure(e:unknown) { const msg=e instanceof Error ? e.message : "Erro inesperado"; return Response.json({error:msg.replace(/^(AUTH|FORBIDDEN):/,"")},{status:e instanceof AuthError?e.status:msg.startsWith("AUTH:")?401:msg.startsWith("FORBIDDEN:")?403:400,headers:{"Cache-Control":"private, no-store"}}); }
 export async function config() {
  const row=await db().prepare("SELECT value FROM settings WHERE id='store'").first<{value:string}>();
- return row ? JSON.parse(row.value) : {discord:"https://discord.gg/Fev2paUtsC",whatsapp:"",installer:"",automatic:true};
+ const settings=row ? JSON.parse(row.value) : {discord:"https://discord.gg/Fev2paUtsC",whatsapp:"",automatic:true};
+ return {discord:settings.discord,whatsapp:settings.whatsapp,automatic:settings.automatic};
 }
 export function pixReady() {return appmaxReady(env);}
 export function appmax(path:string,init:RequestInit={}) {return createAppmaxClient(env)(path,init);}
