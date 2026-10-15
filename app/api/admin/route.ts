@@ -3,6 +3,7 @@ import { z } from "zod";
 const image=z.union([z.literal(""),z.string().url().refine(v=>v.startsWith("https://"))]);
 const product=z.object({id:z.string().optional(),name:z.string().min(2).max(120),category:z.enum(["Steam","PlayStation","Xbox","Outros"]),description:z.string().max(3000),image,price:z.number().int().min(1).max(10000000),old_price:z.number().int().min(0),active:z.number().int().min(0).max(1),automatic:z.number().int().min(0).max(1)});
 export async function GET() {
+ 
  try {
   const user=await identity(true);
   if(pixReady()) {
