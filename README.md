@@ -8,7 +8,7 @@ React 19 + TypeScript, Vinext (API compatível com Next.js), Cloudflare Workers,
 
 ## Estado da entrega
 
-A publicação inicial é privada, para revisão do proprietário. O catálogo vazio exibe exemplos claramente marcados, sem gerar pagamentos. Importar exemplos no painel cria produtos INATIVOS, sem estoque. Cadastre edição, região, descrição, preço e keys reais antes de ativá-los.
+A publicação inicial é privada, para revisão do proprietário. O catálogo exibe exclusivamente produtos ativos cadastrados no banco. Se não houver produtos, a vitrine mostra uma mensagem de catálogo vazio. Cadastre edição, região, descrição, preço e keys reais antes de ativá-los.
 
 O administrador da publicação é a conta proprietária configurada em `ADMIN_EMAILS`. Na hospedagem Sites, o login é gerenciado pela plataforma; em desenvolvimento local o starter simula `seedy@sites.test`. Nenhuma senha padrão é criada. A vitrine exige login para finalizar e consultar pedidos. Para usar outra hospedagem/autenticação, adapte `app/chatgpt-auth.ts` e o controle de acesso; headers de identidade nunca devem ser aceitos diretamente em um servidor público sem o proxy confiável da plataforma.
 
@@ -37,7 +37,14 @@ Entrega automática exige a opção global e a opção do produto. Entrega manua
 O build `npm run build:vercel` conecta as rotas ao PostgreSQL pelo módulo
 `lib/postgres.mjs`. Configure `DATABASE_URL` nas variáveis protegidas do servidor
 da Vercel com a URI do Supabase Transaction pooler (porta 6543), senha codificada
-na URI e TLS com certificado válido. Use `.env.example` como referência.
+na URI e TLS com certificado válido.
+Baixe o certificado CA em Supabase → Database Settings → SSL Configuration e
+configure `DATABASE_SSL_CA` na Vercel com o conteúdo PEM completo, incluindo
+`-----BEGIN CERTIFICATE-----` e `-----END CERTIFICATE-----`. São aceitas quebras
+de linha reais ou a sequência literal `\n`. Essa CA permite verificar o certificado
+do Supabase quando ele não está na lista de autoridades confiáveis do Node.js.
+O módulo configura TLS diretamente e remove as opções SSL da URI para evitar
+que o driver sobrescreva a CA; a validação de certificado e hostname permanece ativa.
 A conexão é criada na primeira requisição e o pool é reutilizado. Não use prefixo
 `NEXT_PUBLIC_` para a conexão nem coloque a senha no código.
 
@@ -81,7 +88,7 @@ Os testes usam Node 24/SQLite em memória e cobrem disputa pela última key, res
 
 ## Antes da abertura comercial
 
-Cadastre produtos e estoque reais, confira os direitos de distribuição das keys e as imagens usadas, configure dados comerciais e políticas de atendimento/privacidade, disponibilize o instalador oficial e homologue o Pix. As imagens remotas de jogos são demonstrativas. Os resultados do dashboard usam pagamentos aprovados e excluem reembolsados/contestados, com limite de 5.000 pedidos mais recentes. A página inicial não exibe avaliações ou estatísticas fictícias.
+Cadastre produtos e estoque reais, confira os direitos de distribuição das keys e as imagens usadas, configure dados comerciais e políticas de atendimento/privacidade, disponibilize o instalador oficial e homologue o Pix. Os resultados do dashboard usam pagamentos aprovados e excluem reembolsados/contestados, com limite de 5.000 pedidos mais recentes. A página inicial não exibe avaliações ou estatísticas fictícias.
 
 Documentação do provedor: https://docs.appmax.com.br/api-reference/payments/pix e https://docs.appmax.com.br/guides/webhooks
 

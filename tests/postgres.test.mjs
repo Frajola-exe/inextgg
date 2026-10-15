@@ -5,6 +5,33 @@ import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
 import { createDatabase } from '../lib/postgres-adapter.mjs';
 import { reservationStatements } from '../lib/inventory.ts';
+import { postgresPoolOptions } from '../lib/postgres.mjs';
+import { rootCertificates, createSecureContext } from 'node:tls';
+
+test('Supabase CA survives pg URI parsing with TLS verification enabled', () => {
+  const ca = rootCertificates[0];
+  const options = postgresPoolOptions({
+    DATABASE_URL: 'postgresql://postgres.project:p%40ss@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&sslrootcert=missing.crt&sslnegotiation=direct&application_name=inext',
+    DATABASE_SSL_CA: ca.replaceAll('\n', '\\n'),
+  });
+  const client = new pg.Client(options);
+  assert.equal(client.ssl.ca, ca.trim());
+  assert.equal(client.ssl.rejectUnauthorized, true);
+  assert.equal(client.host, 'aws-0-us-east-1.pooler.supabase.com');
+  assert.equal(client.port, 6543);
+  assert.equal(client.password, 'p@ss');
+  assert.equal(client.connectionParameters.application_name, 'inext');
+  assert.doesNotThrow(() => createSecureContext(client.ssl));
+});
+
+test('URI flags cannot disable TLS verification and public certificates still work', () => {
+  for (const flags of ['sslmode=no-verify', 'sslmode=disable', 'ssl=0', 'sslmode=require&uselibpqcompat=true']) {
+    const client = new pg.Client(postgresPoolOptions({ DATABASE_URL: `postgresql://user:pass@host/db?${flags}` }));
+    assert.equal(client.ssl.rejectUnauthorized, true);
+    assert.equal(client.ssl.ca, undefined);
+  }
+  assert.throws(() => postgresPoolOptions({ DATABASE_URL: 'invalid' }), /URL PostgreSQL válida/);
+});
 
 test('Vercel lazily reads DATABASE_URL and reuses its PostgreSQL pool', async () => {
   const { env } = await import('../lib/vercel-workers.mjs');
@@ -45,17 +72,20 @@ test('PostgreSQL supports catalog, Appmax reservation, rollback and payment upda
     const tables = await engine.query("SELECT rowsecurity FROM pg_tables WHERE schemaname='public'");
     assert.equal(tables.rows.length, 5);
     assert.ok(tables.rows.every(row => row.rowsecurity));
-    await db.prepare('INSERT INTO products(id,name,category,description,image,price) VALUES(?,?,?,?,?,?)')
-      .bind('p', 'Game', 'Steam', '', '', 1000).run();
-    await db.prepare('INSERT INTO keys(id,product_id,code) VALUES(?,?,?)').bind('k', 'p', '00123').run();
     globalThis.__appmaxTestEnv = { DB: db };
     globalThis.__appmaxTestUser = null;
     const store = await import('../app/api/store/route.ts');
+    const emptyResponse = await store.GET();
+    assert.equal(emptyResponse.status, 200);
+    assert.deepEqual((await emptyResponse.json()).products, []);
+    await db.prepare('INSERT INTO products(id,name,category,description,image,price) VALUES(?,?,?,?,?,?)')
+      .bind('p', 'Game', 'Steam', '', '', 1000).run();
+    await db.prepare('INSERT INTO keys(id,product_id,code) VALUES(?,?,?)').bind('k', 'p', '00123').run();
     const response = await store.GET();
     assert.equal(response.status, 200);
     const catalog = await response.json();
     assert.equal(catalog.products[0].stock, 1);
-    assert.equal(catalog.demo, false);
+    assert.equal('demo' in catalog, false);
     const reserve = (id, quantity = 1) => db.batch(reservationStatements({
       id, userId: 'u', email: 'buyer@example.com', requestKey: id, createdAt: 1791936000000,
       items: [{ id: 'p', name: 'Game', price: 1000, quantity, automatic: 1 }],

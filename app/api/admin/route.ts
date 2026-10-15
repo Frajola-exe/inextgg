@@ -1,6 +1,5 @@
 import { db, identity, failure, sameOrigin, config, reconcile, fulfill, pixReady } from "../../../lib/server";
 import { z } from "zod";
-import { samples } from "../../../lib/catalog";
 const image=z.union([z.literal(""),z.string().url().refine(v=>v.startsWith("https://"))]);
 const product=z.object({id:z.string().optional(),name:z.string().min(2).max(120),category:z.enum(["Steam","PlayStation","Xbox","Outros"]),description:z.string().max(3000),image,price:z.number().int().min(1).max(10000000),old_price:z.number().int().min(0),active:z.number().int().min(0).max(1),automatic:z.number().int().min(0).max(1)});
 export async function GET() {
@@ -32,10 +31,6 @@ export async function POST(request:Request) {
   } else if(body.action==="settings") {
    const value=z.object({discord:z.string().url().refine(v=>v.startsWith("https://discord.gg/")||v.startsWith("https://discord.com/invite/")),whatsapp:z.union([z.literal(""),z.string().regex(/^\d{10,15}$/)]),installer:image,automatic:z.boolean()}).parse(body.settings);
    await db().prepare("INSERT INTO settings(id,value) VALUES('store',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind(JSON.stringify(value)).run();
-  } else if(body.action==="seed") {
-   const existing=await db().prepare("SELECT COUNT(*) c FROM products WHERE deleted=0").first<any>();
-   if(existing.c) throw new Error("O catálogo já possui produtos.");
-   await db().batch(samples.map(p=>db().prepare("INSERT INTO products(id,name,category,description,image,price,old_price,active,automatic) VALUES(?,?,?,?,?,?,?,0,1)").bind(crypto.randomUUID(),p.name,p.category,p.description,p.image,p.price,p.old_price)));
   } else if(body.action==="deliver" || body.action==="reconcile") {
    const order=await db().prepare("SELECT * FROM orders WHERE id=?").bind(z.string().parse(body.id)).first<any>();
    if(!order) throw new Error("Pedido não encontrado.");
