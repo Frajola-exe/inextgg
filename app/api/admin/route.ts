@@ -29,7 +29,7 @@ export async function POST(request:Request) {
    if(new Set(codes).size!==codes.length) throw new Error("A lista contém keys duplicadas.");
    await db().batch(codes.map(code=>db().prepare("INSERT INTO keys(id,product_id,code) VALUES(?,?,?)").bind(crypto.randomUUID(),id,code)));
   } else if(body.action==="settings") {
-   const value=z.object({discord:z.string().url().refine(v=>v.startsWith("https://discord.gg/")||v.startsWith("https://discord.com/invite/")),whatsapp:z.union([z.literal(""),z.string().regex(/^\d{10,15}$/)]),installer:image,automatic:z.boolean()}).parse(body.settings);
+   const value=z.object({discord:z.string().url().refine(v=>v.startsWith("https://discord.gg/")||v.startsWith("https://discord.com/invite/")),whatsapp:z.union([z.literal(""),z.string().regex(/^\d{10,15}$/)]),automatic:z.boolean()}).parse(body.settings);
    await db().prepare("INSERT INTO settings(id,value) VALUES('store',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind(JSON.stringify(value)).run();
   } else if(body.action==="deliver" || body.action==="reconcile") {
    const order=await db().prepare("SELECT * FROM orders WHERE id=?").bind(z.string().parse(body.id)).first<any>();
