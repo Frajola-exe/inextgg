@@ -19,3 +19,10 @@
 
 .platform-logo{display:inline-block;object-fit:contain;flex-shrink:0;vertical-align:middle}
 @media(max-width:700px){.platform-mark .platform-logo{width:25px;height:25px}}
+
+.floating-support{position:fixed;right: max(28px,env(safe-area-inset-right));bottom: max(28px,env(safe-area-inset-bottom));z-index:40;width:76px;height:76px;padding:0;border:0;border-radius:50%;display:grid;place-items:center;background:#288fff;color:#fff;box-shadow:0 8px 30px #1685ff40;transition:background .2s,box-shadow .2s,transform .2s}
+.floating-support:hover{background:#147df2;box-shadow:0 10px 36px #1685ff60;transform:translateY(-3px)}
+.floating-support:active{transform:scale(.96)}
+.floating-support:focus-visible{outline:3px solid #fff;outline-offset:4px}
+@media(max-width:700px){.floating-support{width:60px;height:60px;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom))}.floating-support svg{width:28px;height:28px}}
+@media(prefers-reduced-motion:reduce){.floating-support{transition:none}.floating-support:hover,.floating-support:active{transform:none}}
