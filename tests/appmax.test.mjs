@@ -34,12 +34,32 @@ test('digital Pix defaults only missing shipping, discount and installment fee t
  assert.equal(paymentMatches(order,{...payment,order:{...payment.order,amounts:{sub_total:1000,shipping_value:1}}}),false);
 });
 
-test('unpaid cancellation accepts decimal serialization of zero but rejects fractional or positive paid values',()=>{
+test('unpaid cancellation accepts zero but rejects invalid or unsupported reported totals',()=>{
  for(const total_paid of [0,'0','0.00',null,undefined]) {
   assert.equal(cancellationMismatch(order,{order:{id:42,status:'cancelado',total_paid}}),null);
  }
  for(const total_paid of [1,'0.01','1.00',false,'']) {
   assert.ok(cancellationMismatch(order,{order:{id:42,status:'cancelado',total_paid}}));
+ }
+});
+
+test('cancelled Pix can retain the order total without representing a settled payment',()=>{
+ const cancelled={order:{id:42,status:'cancelado',total_paid:1000},customer:{id:10},payment:{method:'pix',pix:{end_to_end_id:null}}};
+ for(const total_paid of [1000,'1000','1000.00']) {
+  assert.equal(cancellationMismatch(order,{...cancelled,order:{...cancelled.order,total_paid}}),null);
+ }
+ for(const data of [
+  {...cancelled,order:{...cancelled.order,total_paid:100}},
+  {...cancelled,order:{...cancelled.order,total_paid:'1000.01'}},
+  {...cancelled,order:{...cancelled.order,status:'recusado_por_risco'}},
+  {...cancelled,payment:{method:'creditcard'}},
+  {...cancelled,payment:{method:'pix',paid_at:'2026-10-15 12:00:00'}},
+  {...cancelled,payment:{method:'pix',pix:{paid_at:'2026-10-15 12:00:00'}}},
+  {...cancelled,payment:{method:'pix',pix:{end_to_end_id:'SETTLED-PIX'}}},
+  {...cancelled,refund:{refunded_at:'2026-10-15 12:00:00'}},
+ ])assert.ok(cancellationMismatch(order,data));
+ for(const total_paid of [0,1000]) {
+  assert.ok(cancellationMismatch(order,{...cancelled,order:{...cancelled.order,total_paid},payment:{method:'pix',pix:{end_to_end_id:'SETTLED-PIX'}}}));
  }
 });
 test('pending order can have no payment; refunds still require order identity and amounts',()=>{assert.equal(paymentMatches(order,{...payment,order:{...payment.order,status:'pendente',total_paid:0},payment:null}),true);assert.equal(paymentMatches(order,{...payment,order:{...payment.order,status:'estornado'}}),true);});

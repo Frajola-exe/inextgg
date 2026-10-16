@@ -125,7 +125,7 @@ test('dashboard cancellation without any webhook returns stock before admin, cat
  for(const read of [()=>admin.GET(),()=>store.GET(),()=>routes.GET(new Request('https://store.test/api/orders'))]) {
   const s=setup();const {id}=await (await s.post()).json();
   assert.equal(s.db.prepare('SELECT COUNT(*) n FROM appmax_webhook_jobs').get().n,0);
-  s.state.remoteResponse={order:{id:42,status:'cancelado',total_paid:'0.00'}};
+  s.state.remoteResponse={order:{id:42,status:'cancelado',total_paid:'1000.00'},customer:{id:10},payment:{method:'pix',pix:{end_to_end_id:null}}};
   const response=await read();assert.equal(response.status,200);
   const data=await response.json();
   if(data.products)assert.equal(data.products[0].stock,1);
