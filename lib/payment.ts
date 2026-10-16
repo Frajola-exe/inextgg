@@ -27,8 +27,14 @@ export function cancellationMismatch(order:any,data:any): string | null {
  if(order.payment_provider!=="appmax" || !order.payment_id || String(remote?.id)!==String(order.payment_id)) return "identificador do pedido";
  if(!["cancelled","rejected"].includes(appmaxStatus(remote.status))) return "status de cancelamento";
  if(data.customer?.id!=null && String(data.customer.id)!==String(order.appmax_customer_id)) return "identificador do cliente";
- if(remote.total_paid!=null && centavos(remote.total_paid)!==0) return "cancelamento com valor pago ou inválido";
- if(data.payment?.paid_at || remote.paid_at) return "cancelamento com registro de pagamento";
+ // Production can retain the full order total in total_paid on cancelled Pix.
+ // Only that exact Pix case is accepted; actual settlement evidence still blocks it.
+ if(remote.total_paid!=null) {
+  const amount=centavos(remote.total_paid);
+  const cancelledPixTotal=remote.status==="cancelado" && data.payment?.method==="pix" && amount===order.total;
+  if(amount===null || (amount!==0 && !cancelledPixTotal)) return "cancelamento com valor inválido ou divergente";
+ }
+ if(data.payment?.paid_at || data.payment?.pix?.paid_at || data.payment?.pix?.end_to_end_id || remote.paid_at || data.refund?.refunded_at) return "cancelamento com registro de pagamento";
  return null;
 }
 export function paymentMismatch(order: any, data: any): string | null {

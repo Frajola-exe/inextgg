@@ -120,7 +120,7 @@ test('PostgreSQL supports catalog, Appmax reservation, cancellation, delivery an
     assert.deepEqual(JSON.parse(await db.prepare("SELECT value FROM settings WHERE id='store'").first('value')), { automatic: true });
     Object.assign(globalThis.__appmaxTestEnv, { APPMAX_CLIENT_ID: 'merchant', APPMAX_CLIENT_SECRET: 'secret', APPMAX_ENVIRONMENT: 'sandbox', APPMAX_EXTERNAL_ID: 'installation' });
     const { reconcile } = await import('../lib/server.ts');
-    let remote = { order: { id: 42, status: 'cancelado', total_paid: '0.00' } };
+    let remote = { order: { id: 42, status: 'cancelado', total_paid: '1000.00' }, customer: { id: 10 }, payment: { method: 'pix', pix: { end_to_end_id: null } } };
     globalThis.fetch = async url => Response.json(url.includes('/oauth2/token') ? { access_token: 'test-token' } : { data: remote, errors: [] });
     await db.prepare("UPDATE orders SET payment_id='42',appmax_customer_id='10',payment_state='done',status='pending',qr='000201',qr_image='image' WHERE id='first'").run();
     // Recover a dashboard cancellation even when no webhook job exists.
