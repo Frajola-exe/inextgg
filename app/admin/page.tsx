@@ -8,6 +8,17 @@ export default function Admin(){
  const [data,setData]=useState<any>(null),[error,setError]=useState(""),[tab,setTab]=useState("Dashboard"),[period,setPeriod]=useState(30),[query,setQuery]=useState(""),[edit,setEdit]=useState<any>(null),[stock,setStock]=useState<any>(null),[codes,setCodes]=useState(""),[settings,setSettings]=useState<any>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState(""),[remove,setRemove]=useState<any>(null);
  async function load(){try{const d=await api("/api/admin");setData(d);setSettings(d.settings);}catch(e:any){setError(e.message);}}
  useEffect(()=>{load();},[]);
+ useEffect(()=>{
+  let active=true,refreshing=false;
+  async function refresh(){
+   if(document.hidden || refreshing)return;
+   refreshing=true;
+   try{const d=await api("/api/admin");if(active)setData(d);}catch{}finally{refreshing=false;}
+  }
+  const timer=setInterval(refresh,30000);
+  window.addEventListener("focus",refresh);
+  return()=>{active=false;clearInterval(timer);window.removeEventListener("focus",refresh);};
+ },[]);
  async function signOut(){if(data.provider==="sites"){location.assign("/signout-with-chatgpt?return_to=/");return;}setBusy(true);try{await api("/api/auth/logout",{});location.assign("/");}catch(e:any){setError(e.message);setBusy(false);}}
  async function mutate(body:any){setBusy(true);setError("");setMessage("");try{await api("/api/admin",body);await load();setMessage("Alterações salvas.");return true;}catch(e:any){setError(e.message);return false;}finally{setBusy(false);}}
  const orders=data?.orders||[], products=data?.products||[],start=Date.now()-period*86400000,filtered=orders.filter((o:any)=>o.created_at>=start),paid=orders.filter((o:any)=>o.status==="approved"&&o.paid_at>=start),revenue=paid.reduce((n:number,o:any)=>n+o.total,0),units=paid.reduce((n:number,o:any)=>n+JSON.parse(o.items).reduce((s:number,i:any)=>s+i.quantity,0),0);

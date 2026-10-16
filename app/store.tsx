@@ -23,6 +23,17 @@ export default function Store({platform,productId}:{platform?:string;productId?:
  useEffect(()=>{api("/api/store").then(d=>{setData(d);try{const saved=JSON.parse(sessionStorage.getItem("inext-cart")||"[]");setCart(saved.flatMap((i:any)=>{const p=d.products.find((p:Product)=>p.id===i.id);return p&&Number.isInteger(i.quantity)&&i.quantity>0?[{product:p,quantity:Math.min(i.quantity,5)}]:[];}));setRequestKey(sessionStorage.getItem("inext-checkout-key")||crypto.randomUUID());}catch{setRequestKey(crypto.randomUUID());}}).catch(e=>setError(e.message)).finally(()=>setLoading(false));try{setFavorites(JSON.parse(localStorage.getItem("inext-favorites")||"[]"));}catch{}},[]);
  useEffect(()=>{if(loading)return;sessionStorage.setItem("inext-cart",JSON.stringify(cart.map(i=>({id:i.product.id,quantity:i.quantity}))));if(requestKey)sessionStorage.setItem("inext-checkout-key",requestKey);},[cart,requestKey,loading]);
  useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(""),3000);return()=>clearTimeout(t);},[toast]);
+ useEffect(()=>{
+  let active=true,refreshing=false;
+  async function refresh(){
+   if(document.hidden || refreshing)return;
+   refreshing=true;
+   try{const d=await api("/api/store");if(active)setData(d);}catch{}finally{refreshing=false;}
+  }
+  const timer=setInterval(refresh,30000);
+  window.addEventListener("focus",refresh);
+  return()=>{active=false;clearInterval(timer);window.removeEventListener("focus",refresh);};
+ },[]);
  useEffect(()=>{if(!order || view!=="payment" || (order.status==="approved"&&order.delivered_at) || ["rejected","cancelled","refunded","charged_back"].includes(order.status))return;const t=setInterval(()=>api(`/api/orders?id=${order.id}`).then(setOrder).catch(e=>setError(e.message)),8000);return()=>clearInterval(t);},[order?.id,order?.status,order?.delivered_at,view]);
  const normalizeSearch=(value:string)=>value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
  const searchTerm=normalizeSearch(search);

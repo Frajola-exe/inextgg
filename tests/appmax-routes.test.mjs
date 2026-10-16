@@ -7,8 +7,9 @@ globalThis.__appmaxTestUser={userId:'buyer',email:'buyer@example.com',displayNam
 globalThis.__appmaxTestTasks=[];
 const routes=await import('../app/api/orders/route.ts');
 const admin=await import('../app/api/admin/route.ts');
+const store=await import('../app/api/store/route.ts');
 const webhook=await import('../app/api/webhooks/pix/route.ts');
-const {reconcile}=await import('../lib/server.ts');
+const {reconcile,reconcileInventory}=await import('../lib/server.ts');
 const originalFetch=globalThis.fetch;
 after(()=>{globalThis.fetch=originalFetch;});
 function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
@@ -27,7 +28,8 @@ function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
   if(url.endsWith('/v1/customers'))return Response.json({data:{customer:{id:10}}});
   if(url.endsWith('/v1/orders'))return Response.json({data:{order:{id:42,status:'pendente'}}});
   if(url.endsWith('/v1/payments/pix'))return state.pixFailure?Response.json({}, {status:state.pixFailure}):Response.json({data:{payment:{pix_emv:'000201',pix_qrcode:'YWJj',pix_expiration_date:'2026-10-13 15:30:00'}}});
-  if(url.endsWith('/v1/orders/42'))return Response.json({data:state.remoteResponse??{order:{id:42,status:state.status,total_paid:state.paidTotal,amounts:state.amounts},customer:{id:state.customerId,email:'buyer@example.com'},payment:{method:state.method}},errors:state.lookupErrors});
+  const remoteId=url.match(/\/v1\/orders\/(\d+)$/)?.[1];
+  if(remoteId)return Response.json({data:state.remoteResponses?.[remoteId]??state.remoteResponse??{order:{id:Number(remoteId),status:state.status,total_paid:state.paidTotal,amounts:state.amounts},customer:{id:state.customerId,email:'buyer@example.com'},payment:{method:state.method}},errors:state.lookupErrors});
   throw new Error(`Unexpected endpoint: ${url}`);
  };
  const body={requestKey:crypto.randomUUID(),buyer:{firstName:'Ana',lastName:'Silva',phone:'71999999999',document:'52998224725',ip:'2001:db8::1'},items:[{id:'p',quantity:1}]};
@@ -117,6 +119,68 @@ test('cancelled webhook recovers stock after authenticated lookup even if email 
  assert.equal(s.db.prepare('SELECT status FROM orders WHERE id=?').get(id).status,'cancelled');
  assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,null);
  assert.equal(s.db.prepare('SELECT count(*) n FROM appmax_webhook_jobs').get().n,0);s.db.close();
+});
+
+test('dashboard cancellation without any webhook returns stock before admin, catalog or order list is read',async()=>{
+ for(const read of [()=>admin.GET(),()=>store.GET(),()=>routes.GET(new Request('https://store.test/api/orders'))]) {
+  const s=setup();const {id}=await (await s.post()).json();
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM appmax_webhook_jobs').get().n,0);
+  s.state.remoteResponse={order:{id:42,status:'cancelado',total_paid:'0.00'}};
+  const response=await read();assert.equal(response.status,200);
+  const data=await response.json();
+  if(data.products)assert.equal(data.products[0].stock,1);
+  if(data.products?.[0].reserved!=null)assert.equal(data.products[0].reserved,0);
+  const orders=Array.isArray(data)?data:data.orders;
+  if(orders)assert.equal(orders.find(o=>o.id===id).status,'cancelled');
+  const order=s.db.prepare('SELECT * FROM orders WHERE id=?').get(id);
+  assert.equal(order.status,'cancelled');assert.equal(order.qr,null);assert.equal(order.qr_image,null);assert.equal(order.pix_expires_at,null);
+  assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,null);
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM appmax_webhook_jobs').get().n,0);
+  s.db.close();
+ }
+});
+
+test('inventory checks share a throttle and rotate past pending orders to reach later cancellations',async()=>{
+ const s=setup({paidTotal:0});const {id}=await (await s.post()).json();
+ const first=s.db.prepare('SELECT * FROM orders WHERE id=?').get(id);
+ for(let i=1;i<=5;i++) {
+  s.db.prepare('INSERT INTO orders(id,user_id,email,items,total,request_key,created_at,payment_provider,payment_id,appmax_customer_id,payment_state,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+   .run(`later-${i}`,'buyer',first.email,first.items,1000,`later-${i}`,first.created_at+i,'appmax',String(42+i),'10','done','pending');
+  s.db.prepare('INSERT INTO keys(id,product_id,code,order_id) VALUES(?,?,?,?)').run(`later-key-${i}`,'p',`KEY-${i}`,`later-${i}`);
+ }
+ s.state.remoteResponses={'47':{order:{id:47,status:'cancelado',total_paid:0}}};
+ const before=s.calls.length;
+ await Promise.all([reconcileInventory(),reconcileInventory()]);
+ const lookups=()=>s.calls.slice(before).filter(c=>/\/v1\/orders\/\d+$/.test(c.url));
+ assert.equal(lookups().length,5);
+ assert.equal(new Set(lookups().map(c=>c.url)).size,5);
+ assert.equal(s.db.prepare("SELECT order_id FROM keys WHERE id='later-key-5'").get().order_id,'later-5');
+ await reconcileInventory();assert.equal(lookups().length,5);
+ s.db.exec("UPDATE settings SET value='0' WHERE id='appmax_inventory_sync'");
+ await reconcileInventory();
+ assert.equal(lookups().length,6);
+ assert.equal(s.db.prepare("SELECT order_id FROM keys WHERE id='later-key-5'").get().order_id,null);
+ assert.equal(s.db.prepare("SELECT status FROM orders WHERE id='later-5'").get().status,'cancelled');
+ s.db.close();
+});
+
+test('inventory recovery retains failed checks for retry and never releases a pending or delivered key',async()=>{
+ const s=setup({paidTotal:0});const {id}=await (await s.post()).json();
+ await store.GET();assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,id);
+ s.db.exec("UPDATE settings SET value='0' WHERE id='appmax_inventory_sync'; UPDATE appmax_webhook_jobs SET received_at=0");
+ s.state.remoteResponse={order:{id:99,status:'cancelado',total_paid:0}};
+ const failed=await store.GET();assert.equal(failed.status,200);assert.equal((await failed.json()).products[0].stock,0);
+ assert.equal(s.db.prepare('SELECT COUNT(*) n FROM appmax_webhook_jobs').get().n,1);
+ s.db.exec("UPDATE settings SET value='0' WHERE id='appmax_inventory_sync'; UPDATE appmax_webhook_jobs SET received_at=0");
+ s.state.remoteResponse={order:{id:42,status:'cancelado',total_paid:0}};
+ const recovered=await store.GET();assert.equal((await recovered.json()).products[0].stock,1);
+ assert.equal(s.db.prepare('SELECT COUNT(*) n FROM appmax_webhook_jobs').get().n,0);
+ s.db.prepare('UPDATE keys SET order_id=?').run(id);
+ s.db.exec("UPDATE orders SET status='approved',paid_at=123,delivered_at=456; UPDATE settings SET value='0' WHERE id='appmax_inventory_sync'");
+ const calls=s.calls.length;
+ const delivered=await store.GET();assert.equal((await delivered.json()).products[0].stock,0);
+ assert.equal(s.calls.length,calls);assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,id);
+ s.db.close();
 });
 
 test('cancellation cannot free keys with contradictory identity or payment evidence',async()=>{
