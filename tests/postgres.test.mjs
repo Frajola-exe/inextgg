@@ -123,7 +123,12 @@ test('PostgreSQL supports catalog, Appmax reservation, cancellation, delivery an
     let remote = { order: { id: 42, status: 'cancelado', total_paid: '0.00' } };
     globalThis.fetch = async url => Response.json(url.includes('/oauth2/token') ? { access_token: 'test-token' } : { data: remote, errors: [] });
     await db.prepare("UPDATE orders SET payment_id='42',appmax_customer_id='10',payment_state='done',status='pending',qr='000201',qr_image='image' WHERE id='first'").run();
-    await reconcile(await db.prepare("SELECT * FROM orders WHERE id='first'").first());
+    // Recover a dashboard cancellation even when no webhook job exists.
+    assert.equal(await db.prepare('SELECT COUNT(*) n FROM appmax_webhook_jobs').first('n'), 1);
+    await db.prepare('DELETE FROM appmax_webhook_jobs').run();
+    const restocked = await store.GET();
+    assert.equal(restocked.status, 200);
+    assert.equal((await restocked.json()).products[0].stock, 1);
     const cancelled = await db.prepare("SELECT * FROM orders WHERE id='first'").first();
     assert.equal(cancelled.status, 'cancelled');
     assert.equal(cancelled.qr, null);

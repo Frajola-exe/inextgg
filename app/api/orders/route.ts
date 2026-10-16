@@ -1,4 +1,4 @@
-import { db, identity, failure, appmax, pixReady, reconcile, sameOrigin, config } from "../../../lib/server";
+import { db, identity, failure, appmax, pixReady, reconcile, reconcileInventory, sameOrigin, config } from "../../../lib/server";
 import { AppmaxError } from "../../../lib/appmax";
 import { pixInstructions, PaymentMismatchError } from "../../../lib/payment";
 import { checkoutSchema } from "../../../lib/checkout";
@@ -7,7 +7,7 @@ export async function GET(request:Request) {
  
  try {
   const user=await identity(), id=new URL(request.url).searchParams.get("id");
-  if(!id) {const orders=await db().prepare("SELECT id,items,total,status,created_at,delivered_at FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(user.userId).all(); return Response.json(orders.results);}
+  if(!id) {await reconcileInventory();const orders=await db().prepare("SELECT id,items,total,status,created_at,delivered_at FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(user.userId).all(); return Response.json(orders.results,{headers:{"Cache-Control":"private, no-store"}});}
   let o=await db().prepare("SELECT * FROM orders WHERE id=? AND user_id=?").bind(id,user.userId).first<any>();
   if(!o) return Response.json({error:"Pedido não encontrado."},{status:404});
   let reconciliationError:string|null=null;
