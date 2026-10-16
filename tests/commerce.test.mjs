@@ -12,6 +12,22 @@ test('insufficient stock on one item reserves nothing across cart',()=>{const d=
 test('price total comes from server product snapshot and quantity',()=>{const d=database();reserve(d,'one',[p,{...p,id:'q',name:'Other',price:2000}]);assert.equal(d.prepare('SELECT total FROM orders').get().total,3000);assert.equal(d.prepare('SELECT COUNT(*) n FROM keys WHERE order_id IS NOT NULL').get().n,2);});
 test('duplicate inventory keys rollback complete import',()=>{const d=database();d.exec('BEGIN');try{d.prepare("INSERT INTO keys(id,product_id,code) VALUES('new','p','CCC')").run();d.prepare("INSERT INTO keys(id,product_id,code) VALUES('dup','p','AAA')").run();assert.fail();}catch{d.exec('ROLLBACK');}assert.equal(d.prepare("SELECT COUNT(*) n FROM keys WHERE code='CCC'").get().n,0);});
 
+test('services and bots reserve without keys and coexist with key products',()=>{
+ const d=database();
+ d.exec("INSERT INTO products(id,name,category,description,image,price,product_type) VALUES('s','Setup','Outros','','',1000,'service'),('b','Bot','Outros','','',2000,'bot')");
+ const service={id:'s',name:'Setup',quantity:1,price:1000,automatic:0,product_type:'service'};
+ const bot={id:'b',name:'Bot',quantity:1,price:2000,automatic:0,product_type:'bot'};
+ reserve(d,'one',[p,service,bot]);
+ assert.equal(d.prepare('SELECT total FROM orders WHERE id=?').get('one').total,4000);
+ assert.equal(d.prepare('SELECT COUNT(*) n FROM keys WHERE order_id=?').get('one').n,1);
+ reserve(d,'two',[service,bot]);
+ assert.equal(d.prepare('SELECT total FROM orders WHERE id=?').get('two').total,3000);
+ const order=d.prepare('SELECT * FROM orders WHERE id=?').get('two');
+ const results=retryReservationStatements(order).map(s=>d.prepare(s.sql).run(...s.values));
+ assert.equal(results.at(-1).changes,1);
+ d.close();
+});
+
 test('retry reacquires the entire cart or reserves nothing when one item sold out',()=>{
  const d=database();reserve(d,'one',[p,{...p,id:'q',price:2000}]);
  d.exec("UPDATE keys SET order_id=NULL; DELETE FROM keys WHERE product_id='q'");

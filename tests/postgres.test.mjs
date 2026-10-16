@@ -8,6 +8,16 @@ import { reservationStatements, retryReservationStatements } from '../lib/invent
 import { postgresPoolOptions } from '../lib/postgres.mjs';
 import { rootCertificates, createSecureContext } from 'node:tls';
 
+test('existing PostgreSQL products migrate to key and fixed defaults', async () => {
+  const engine = new PGlite();
+  try {
+    await engine.exec("CREATE TABLE products (id text PRIMARY KEY, name text NOT NULL); INSERT INTO products VALUES ('old', 'Existing key')");
+    await engine.exec(await readFile(new URL('../db/product-types-migration.sql', import.meta.url), 'utf8'));
+    const { rows } = await engine.query("SELECT product_type, price_mode FROM products WHERE id='old'");
+    assert.deepEqual(rows[0], { product_type: 'key', price_mode: 'fixed' });
+  } finally { await engine.close(); }
+});
+
 test('Supabase CA survives pg URI parsing with TLS verification enabled', () => {
   const ca = rootCertificates[0];
   const options = postgresPoolOptions({

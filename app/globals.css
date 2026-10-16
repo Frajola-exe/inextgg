@@ -27,3 +27,5 @@
 .floating-support:focus-visible{outline:3px solid #fff;outline-offset:4px}
 @media(max-width:700px){.floating-support{width:60px;height:60px;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom))}.floating-support svg{width:28px;height:28px}}
 @media(prefers-reduced-motion:reduce){.floating-support{transition:none}.floating-support:hover,.floating-support:active{transform:none}}
+.quote-button{border:1px solid var(--border);border-radius:6px;padding:8px 10px;text-align:center;justify-content:center;white-space:nowrap}
+@media(max-width:700px){.price-row:has(.quote-button){flex-wrap:wrap}.price-row .quote-button{width:100%}}

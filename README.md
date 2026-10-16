@@ -60,6 +60,12 @@ Para um banco novo e vazio, execute `db/postgresql.sql` uma única vez no SQL Ed
 do Supabase. Se já executou `postgres-migration/supabase-setup.sql`, as tabelas já
 estão criadas: não execute os dois arquivos. O esquema inclui os campos Appmax e
 RLS; as operações passam pelo servidor com a conexão PostgreSQL autorizada.
+
+Em uma loja PostgreSQL existente, aplique `db/product-types-migration.sql` antes
+do deploy. Em D1 existente, aplique `drizzle/0002_product_types.sql`. Produtos
+anteriores recebem o tipo Key de jogo e preço fixo. Serviços e bots não usam
+estoque de keys; itens negociáveis são encaminhados ao atendimento sem Pix automático.
+
 As reservas usam transações e uma trava compartilhada entre instâncias do servidor.
 Essa trava serializa as gravações e pode limitar o volume de pedidos simultâneos.
 
