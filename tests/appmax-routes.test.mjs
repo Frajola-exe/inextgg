@@ -25,7 +25,7 @@ function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
   if(url.endsWith('/v1/customers'))return Response.json({data:{customer:{id:10}}});
   if(url.endsWith('/v1/orders'))return Response.json({data:{order:{id:42,status:'pendente'}}});
   if(url.endsWith('/v1/payments/pix'))return state.pixFailure?Response.json({}, {status:state.pixFailure}):Response.json({data:{payment:{pix_emv:'000201',pix_qrcode:'YWJj',pix_expiration_date:'2026-10-13 15:30:00'}}});
-  if(url.endsWith('/v1/orders/42'))return Response.json({data:{order:{id:42,status:state.status,total_paid:state.paidTotal,amounts:state.amounts},customer:{id:state.customerId,email:'buyer@example.com'},payment:{method:state.method}}});
+  if(url.endsWith('/v1/orders/42'))return Response.json({data:state.remoteResponse??{order:{id:42,status:state.status,total_paid:state.paidTotal,amounts:state.amounts},customer:{id:state.customerId,email:'buyer@example.com'},payment:{method:state.method}}});
   throw new Error(`Unexpected endpoint: ${url}`);
  };
  const body={requestKey:crypto.randomUUID(),buyer:{firstName:'Ana',lastName:'Silva',phone:'71999999999',document:'52998224725',ip:'2001:db8::1'},items:[{id:'p',quantity:1}]};
@@ -41,7 +41,7 @@ test('real checkout creates customer, digital order and Pix once; approved query
  s.state.status='estornado';const refunded=await routes.GET(new Request(`https://store.test/api/orders?id=${id}`));assert.deepEqual((await refunded.json()).keys,[]);
  s.db.close();
 });
-test('uncertain Pix outcome preserves reservation and repeated checkout never charges again',async()=>{const s=setup({pixFailure:503});const first=await s.post();assert.equal(first.status,200);const id=(await first.json()).id;assert.equal(s.db.prepare('SELECT payment_state FROM orders').get().payment_state,'unknown');await s.post();assert.equal(s.calls.filter(c=>c.url.endsWith('/v1/payments/pix')).length,1);assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,id);s.state.status='cancelado';await routes.GET(new Request(`https://store.test/api/orders?id=${id}`));assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,null);s.db.close();});
+test('uncertain Pix outcome preserves reservation and repeated checkout never charges again',async()=>{const s=setup({pixFailure:503});const first=await s.post();assert.equal(first.status,200);const id=(await first.json()).id;assert.equal(s.db.prepare('SELECT payment_state FROM orders').get().payment_state,'unknown');await s.post();assert.equal(s.calls.filter(c=>c.url.endsWith('/v1/payments/pix')).length,1);assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,id);s.state.status='cancelado';s.state.paidTotal=0;await routes.GET(new Request(`https://store.test/api/orders?id=${id}`));assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,null);s.db.close();});
 test('definite validation rejection can retry on the same remote order',async()=>{const s=setup({pixFailure:422});assert.equal((await s.post()).status,400);assert.equal(s.db.prepare('SELECT payment_state FROM orders').get().payment_state,'idle');s.state.pixFailure=0;assert.equal((await s.post()).status,200);assert.equal(s.calls.filter(c=>c.url.endsWith('/v1/orders')).length,1);s.db.close();});
 test('parallel checkout requests cannot generate two Pix charges',async()=>{const s=setup();const result=await Promise.all([s.post(),s.post()]);assert.ok(result.every(r=>r.status===200));assert.equal(s.calls.filter(c=>c.url.endsWith('/v1/payments/pix')).length,1);assert.equal(s.db.prepare('SELECT count(*) n FROM orders').get().n,1);s.db.close();});
 test('forged paid webhook cannot deliver a key while Appmax reports pending',async()=>{const s=setup();await s.post();const response=await webhook.POST(new Request('https://store.test/api/webhooks/pix',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({event:'order_paid_by_pix',event_type:'order',data:{order_id:42,status:'aprovado',total:1000}})}));assert.equal(response.status,200);await Promise.all(globalThis.__appmaxTestTasks.splice(0));assert.equal(s.db.prepare('SELECT paid_at,delivered_at FROM orders').get().paid_at,null);assert.equal(s.db.prepare('SELECT delivered_at FROM orders').get().delivered_at,null);s.db.close();});
@@ -91,4 +91,58 @@ test('mismatch preserves accessible Pix and reservation, then approval recovers 
  s.state.amounts={sub_total:'1000',shipping_value:'0',discount:'0',installment_fee:'0'};
  const recovered=await (await routes.GET(new Request(`https://store.test/api/orders?id=${id}`))).json();
  assert.equal(recovered.reconciliation_error,null);assert.equal(recovered.keys[0].code,'REAL-KEY');s.db.close();
+});
+
+test('authenticated cancellation without checkout fields releases stock and removes the Pix',async()=>{
+ const s=setup();const {id}=await (await s.post()).json();
+ s.state.customerId=99;
+ const failed=await (await routes.GET(new Request(`https://store.test/api/orders?id=${id}`))).json();
+ assert.match(failed.reconciliation_error,/identificador do cliente/);
+ s.state.remoteResponse={order:{id:42,status:'cancelado',total_paid:0}};
+ const cancelled=await (await routes.GET(new Request(`https://store.test/api/orders?id=${id}`))).json();
+ assert.equal(cancelled.status,'cancelled');assert.equal(cancelled.reconciliation_error,null);
+ assert.equal(cancelled.qr,null);assert.equal(cancelled.qr_image,null);assert.equal(cancelled.pix_expires_at,null);
+ assert.deepEqual(cancelled.keys,[]);assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,null);
+ await routes.GET(new Request(`https://store.test/api/orders?id=${id}`));
+ assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,null);s.db.close();
+});
+
+test('cancelled webhook recovers stock after authenticated lookup even if email and amounts changed',async()=>{
+ const s=setup();const {id}=await (await s.post()).json();
+ s.state.remoteResponse={order:{id:42,status:'cancelado',total_paid:'0',amounts:{sub_total:0}},customer:{id:10,email:'updated@example.com'}};
+ await webhook.POST(new Request('https://store.test/api/webhooks/pix',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({event:'order_cancelled',event_type:'order',data:{order_id:42}})}));
+ await Promise.all(globalThis.__appmaxTestTasks.splice(0));
+ assert.equal(s.db.prepare('SELECT status FROM orders WHERE id=?').get(id).status,'cancelled');
+ assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,null);
+ assert.equal(s.db.prepare('SELECT count(*) n FROM appmax_webhook_jobs').get().n,0);s.db.close();
+});
+
+test('cancellation cannot free keys with contradictory identity or payment evidence',async()=>{
+ const s=setup();const {id}=await (await s.post()).json();
+ for(const data of [
+  {order:{id:99,status:'cancelado',total_paid:0}},
+  {order:{id:42,status:'cancelado',total_paid:0},customer:{id:99}},
+  ...[1000,'invalid',false].map(total_paid=>({order:{id:42,status:'cancelado',total_paid}})),
+  {order:{id:42,status:'cancelado',total_paid:0},payment:{paid_at:'2026-10-15 12:00:00'}}
+ ]){
+  s.state.remoteResponse=data;
+  const order=await (await routes.GET(new Request(`https://store.test/api/orders?id=${id}`))).json();
+  assert.ok(order.reconciliation_error);assert.equal(order.status,'pending');
+  assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,id);
+ }
+ s.state.remoteResponse={order:{id:42,status:'cancelado',total_paid:0}};
+ for(const field of ['paid_at','delivered_at']){
+  s.db.exec('UPDATE orders SET paid_at=NULL,delivered_at=NULL');
+  s.db.exec(`UPDATE orders SET ${field}=123`);
+  const order=await (await routes.GET(new Request(`https://store.test/api/orders?id=${id}`))).json();
+  assert.ok(order.reconciliation_error);assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,id);
+ }
+ s.db.close();
+});
+
+test('forged cancellation cannot release stock while authenticated status stays pending',async()=>{
+ const s=setup();const {id}=await (await s.post()).json();
+ await webhook.POST(new Request('https://store.test/api/webhooks/pix',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({event:'order_cancelled',event_type:'order',data:{order_id:42,status:'cancelado'}})}));
+ await Promise.all(globalThis.__appmaxTestTasks.splice(0));
+ assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,id);s.db.close();
 });

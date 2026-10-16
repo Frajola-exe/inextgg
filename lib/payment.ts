@@ -16,6 +16,21 @@ function centavos(value: unknown): number | null {
  const amount=Number(value);
  return Number.isSafeInteger(amount) && amount>=0 ? amount : null;
 }
+export class PaymentMismatchError extends Error {
+ constructor(reason:string) {super(`Dados do pagamento não correspondem ao pedido (${reason}). Consulte o atendimento com o número do pedido.`);}
+}
+// Only use with the authenticated order lookup, never directly with a webhook.
+// A terminal unpaid cancellation does not need the amount breakdown or email
+// required for delivery, but conflicting identity/payment evidence still blocks it.
+export function cancellationMismatch(order:any,data:any): string | null {
+ const remote=data?.order;
+ if(order.payment_provider!=="appmax" || !order.payment_id || String(remote?.id)!==String(order.payment_id)) return "identificador do pedido";
+ if(!["cancelled","rejected"].includes(appmaxStatus(remote.status))) return "status de cancelamento";
+ if(data.customer?.id!=null && String(data.customer.id)!==String(order.appmax_customer_id)) return "identificador do cliente";
+ if(remote.total_paid!=null && centavos(remote.total_paid)!==0) return "cancelamento com valor pago ou inválido";
+ if(data.payment?.paid_at || remote.paid_at) return "cancelamento com registro de pagamento";
+ return null;
+}
 export function paymentMismatch(order: any, data: any): string | null {
  const remote=data?.order, amounts=remote?.amounts;
  if(order.payment_provider!=="appmax" || String(remote?.id)!==String(order.payment_id) || !order.payment_id) return "identificador do pedido";

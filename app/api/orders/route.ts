@@ -1,6 +1,6 @@
 import { db, identity, failure, appmax, pixReady, reconcile, sameOrigin, config } from "../../../lib/server";
 import { AppmaxError } from "../../../lib/appmax";
-import { pixInstructions } from "../../../lib/payment";
+import { pixInstructions, PaymentMismatchError } from "../../../lib/payment";
 import { checkoutSchema } from "../../../lib/checkout";
 import { reservationStatements, retryReservationStatements } from "../../../lib/inventory";
 export async function GET(request:Request) {
@@ -12,7 +12,7 @@ export async function GET(request:Request) {
   if(!o) return Response.json({error:"Pedido não encontrado."},{status:404});
   let reconciliationError:string|null=null;
   if(o.payment_id && o.payment_provider==="appmax") {
-   try {await reconcile(o);} catch {reconciliationError="Não foi possível confirmar o pagamento. Consulte novamente ou fale com o atendimento informando o número do pedido. Nenhuma nova cobrança foi criada.";}
+   try {await reconcile(o);} catch(error) {reconciliationError=error instanceof PaymentMismatchError?error.message:"Não foi possível confirmar o pagamento. Consulte novamente ou fale com o atendimento informando o número do pedido. Nenhuma nova cobrança foi criada.";}
    o=await db().prepare("SELECT * FROM orders WHERE id=?").bind(id).first<any>();
   }
   const keys=!reconciliationError && o.status==="approved" && o.delivered_at ? (await db().prepare("SELECT k.code,p.name FROM keys k JOIN products p ON p.id=k.product_id WHERE k.order_id=?").bind(id).all()).results : [];

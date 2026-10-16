@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { currentUser, isAdmin, AuthError } from "./auth";
-import { paymentMismatch, appmaxStatus, pixInstructions } from "./payment";
+import { paymentMismatch, cancellationMismatch, PaymentMismatchError, appmaxStatus, pixInstructions } from "./payment";
 import { createAppmaxClient, appmaxReady } from "./appmax";
 export function db() { if(!env.DB) throw new Error("Banco indisponível."); return env.DB; }
 export async function identity(admin=false) {
@@ -35,16 +35,25 @@ export async function reconcile(order:any) {
  if(!order.payment_id) return;
  if(order.payment_provider!=="appmax") throw new Error("Pedido anterior à integração Appmax. Consulte o atendimento para verificar este pagamento.");
  const payment=await appmax(`/v1/orders/${encodeURIComponent(order.payment_id)}`);
+ const status=appmaxStatus(payment.order?.status);
+ if(["cancelled","rejected"].includes(status)) {
+  const mismatch=cancellationMismatch(order,payment);
+  if(mismatch) throw new PaymentMismatchError(mismatch);
+  const results=await db().batch([
+   db().prepare("UPDATE orders SET status=?,payment_state='done',qr=NULL,qr_image=NULL,pix_expires_at=NULL WHERE id=? AND paid_at IS NULL AND delivered_at IS NULL").bind(status,order.id),
+   db().prepare("UPDATE keys SET order_id=NULL WHERE order_id=? AND EXISTS(SELECT 1 FROM orders WHERE id=? AND paid_at IS NULL AND delivered_at IS NULL AND status IN ('cancelled','rejected'))").bind(order.id,order.id)
+  ]);
+  if(!results[0].meta.changes) throw new PaymentMismatchError("cancelamento de pedido com pagamento ou entrega registrados");
+  await db().prepare("DELETE FROM appmax_webhook_jobs WHERE order_id=?").bind(order.id).run();
+  return;
+ }
  const mismatch=paymentMismatch(order,payment);
- if(mismatch) throw new Error(`Dados do pagamento não correspondem ao pedido (${mismatch}). Consulte o atendimento com o número do pedido.`);
- const status=appmaxStatus(payment.order.status);
+ if(mismatch) throw new PaymentMismatchError(mismatch);
  const pix=pixInstructions(payment);
  if(pix) await db().prepare("UPDATE orders SET qr=?,qr_image=?,pix_expires_at=?,payment_state='done' WHERE id=?").bind(pix.qr,pix.image,pix.expiresAt,order.id).run();
  if(status==="approved") {
   await db().prepare("UPDATE orders SET status='approved',paid_at=COALESCE(paid_at,?) WHERE id=?").bind(Date.now(),order.id).run();
   await fulfill(order.id);
- } else if(["cancelled","rejected"].includes(status)) {
-  await db().batch([db().prepare("UPDATE orders SET status=? WHERE id=? AND paid_at IS NULL").bind(status,order.id),db().prepare("UPDATE keys SET order_id=NULL WHERE order_id=? AND EXISTS(SELECT 1 FROM orders WHERE id=? AND paid_at IS NULL AND status IN ('cancelled','rejected'))").bind(order.id,order.id)]);
  } else if(["refunded","charged_back","review"].includes(status)) {
   await db().prepare("UPDATE orders SET status=? WHERE id=?").bind(status,order.id).run();
  }
