@@ -42,7 +42,7 @@ export async function fulfill(id:string, manual=false) {
  const items=JSON.parse(o.items);
  if(!manual && (!c.automatic || items.some((i:any)=>!i.automatic))) return;
  const reserved=await db().prepare("SELECT COUNT(*) n FROM keys WHERE order_id=?").bind(id).first<any>();
- if(reserved.n!==items.reduce((s:number,i:any)=>s+i.quantity,0)) throw new Error("Estoque reservado inconsistente. Procure o atendimento.");
+ if(reserved.n!==items.filter((i:any)=>!i.product_type || i.product_type==="key").reduce((s:number,i:any)=>s+i.quantity,0)) throw new Error("Estoque reservado inconsistente. Procure o atendimento.");
  await db().prepare("UPDATE orders SET delivered_at=? WHERE id=? AND status='approved' AND delivered_at IS NULL").bind(Date.now(),id).run();
 }
 export async function reconcile(order:any) {

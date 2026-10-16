@@ -36,6 +36,33 @@ function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
  function post(){return routes.POST(new Request('https://store.test/api/orders',{method:'POST',headers:{origin:'https://store.test','content-type':'application/json'},body:JSON.stringify(body)}));}
  return {db,body,post,state,calls};
 }
+function adminAction(body){return admin.POST(new Request('https://store.test/api/admin',{method:'POST',headers:{origin:'https://store.test','content-type':'application/json'},body:JSON.stringify(body)}));}
+test('admin creates services and bots without key stock, supports fixed checkout and negotiable contact',async()=>{
+ for(const productType of ['service','bot']) {
+  const s=setup();
+  const id=productType;
+  const product={id,name:productType==='bot'?'Discord bot':'Discord setup',product_type:productType,price_mode:'fixed',category:'Outros',description:'Custom work',image:'',price:1000,old_price:0,active:1,automatic:1};
+  assert.equal((await adminAction({action:'product',product})).status,200);
+  assert.equal(s.db.prepare('SELECT automatic FROM products WHERE id=?').get(id).automatic,0);
+  assert.equal((await adminAction({action:'keys',id,codes:['SHOULD-NOT-IMPORT']})).status,400);
+  s.body.items=[{id,quantity:1}];
+  const response=await s.post();assert.equal(response.status,200);
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM keys WHERE order_id IS NOT NULL').get().n,0);
+  assert.equal(s.db.prepare('SELECT total FROM orders').get().total,1000);
+  s.state.status='aprovado';
+  const orderId=(await response.json()).id;
+  await routes.GET(new Request(`https://store.test/api/orders?id=${orderId}`));
+  assert.equal(s.db.prepare('SELECT delivered_at FROM orders').get().delivered_at,null);
+  assert.equal((await adminAction({action:'deliver',id:orderId})).status,200);
+  assert.ok(s.db.prepare('SELECT delivered_at FROM orders').get().delivered_at);
+  product.price_mode='negotiable';product.price=0;
+  assert.equal((await adminAction({action:'product',product})).status,200);
+  s.body.requestKey=crypto.randomUUID();
+  assert.equal((await s.post()).status,400);
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM orders').get().n,1);
+  s.db.close();
+ }
+});
 test('real checkout creates customer, digital order and Pix once; approved query delivers reserved key',async()=>{
  const s=setup();const response=await s.post();assert.equal(response.status,200);const {id}=await response.json();
  const order=s.db.prepare('SELECT * FROM orders').get();assert.equal(order.payment_provider,'appmax');assert.equal(order.payment_id,'42');assert.equal(order.qr,'000201');assert.equal(order.qr_image,'data:image/png;base64,YWJj');

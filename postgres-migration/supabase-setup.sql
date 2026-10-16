@@ -11,6 +11,8 @@ CREATE TABLE products (
   description text NOT NULL,
   image text NOT NULL,
   price integer NOT NULL,
+  product_type text NOT NULL DEFAULT 'key' CHECK (product_type IN ('key', 'service', 'bot')),
+  price_mode text NOT NULL DEFAULT 'fixed' CHECK (price_mode IN ('fixed', 'negotiable')),
   old_price integer NOT NULL DEFAULT 0,
   active integer NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
   automatic integer NOT NULL DEFAULT 1 CHECK (automatic IN (0, 1)),

@@ -6,7 +6,8 @@ export const products = sqliteTable("products", {
  id: text("id").primaryKey(), name: text("name").notNull(), category: text("category").notNull(),
  description: text("description").notNull(), image: text("image").notNull(), price: integer("price").notNull(),
  oldPrice: integer("old_price").notNull().default(0), active: integer("active").notNull().default(1),
- automatic: integer("automatic").notNull().default(1), deleted: integer("deleted").notNull().default(0)
+ automatic: integer("automatic").notNull().default(1), deleted: integer("deleted").notNull().default(0),
+ productType:text("product_type").notNull().default("key"), priceMode:text("price_mode").notNull().default("fixed")
 });
 export const orders = sqliteTable("orders", {
  id: text("id").primaryKey(), userId: text("user_id").notNull(), email: text("email").notNull(),

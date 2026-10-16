@@ -1,7 +1,11 @@
 import { db, identity, failure, sameOrigin, config, reconcile, reconcileInventory, fulfill, pixReady } from "../../../lib/server";
 import { z } from "zod";
 const image=z.union([z.literal(""),z.string().url().refine(v=>v.startsWith("https://"))]);
-const product=z.object({id:z.string().optional(),name:z.string().min(2).max(120),category:z.enum(["Steam","PlayStation","Xbox","Outros"]),description:z.string().max(3000),image,price:z.number().int().min(1).max(10000000),old_price:z.number().int().min(0),active:z.number().int().min(0).max(1),automatic:z.number().int().min(0).max(1)});
+const product=z.object({id:z.string().optional(),name:z.string().min(2).max(120),product_type:z.enum(["key","service","bot"]).default("key"),price_mode:z.enum(["fixed","negotiable"]).default("fixed"),category:z.enum(["Steam","PlayStation","Xbox","Outros"]),description:z.string().max(3000),image,price:z.number().int().min(0).max(10000000),old_price:z.number().int().min(0),active:z.number().int().min(0).max(1),automatic:z.number().int().min(0).max(1)}).superRefine((p,ctx)=>{
+ if(p.product_type==="key" && p.price_mode!=="fixed") ctx.addIssue({code:"custom",message:"Keys precisam de preço fixo.",path:["price_mode"]});
+ if(p.price_mode==="fixed" && p.price<1) ctx.addIssue({code:"custom",message:"Informe um preço fixo válido.",path:["price"]});
+ if(p.price_mode==="negotiable" && (p.price!==0 || p.old_price!==0)) ctx.addIssue({code:"custom",message:"Preço negociável não pode ter valor definido.",path:["price"]});
+});
 export async function GET() {
  try {
   const user=await identity(true);
@@ -16,12 +20,16 @@ export async function POST(request:Request) {
   sameOrigin(request); await identity(true); const body:any=await request.json();
   if(body.action==="product") {
    const p=product.parse(body.product),id=p.id || crypto.randomUUID();
-   await db().prepare("INSERT INTO products(id,name,category,description,image,price,old_price,active,automatic) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,description=excluded.description,image=excluded.image,price=excluded.price,old_price=excluded.old_price,active=excluded.active,automatic=excluded.automatic").bind(id,p.name,p.category,p.description,p.image,p.price,p.old_price,p.active,p.automatic).run();
+   if(p.id && p.product_type!=="key") {
+    const inventory=await db().prepare("SELECT COUNT(*) n FROM keys WHERE product_id=?").bind(p.id).first<{n:number}>();
+    if(inventory?.n) throw new Error("Remova as keys existentes antes de alterar o tipo do produto.");
+   }
+   await db().prepare("INSERT INTO products(id,name,category,description,image,price,old_price,active,automatic,product_type,price_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,description=excluded.description,image=excluded.image,price=excluded.price,old_price=excluded.old_price,active=excluded.active,automatic=excluded.automatic,product_type=excluded.product_type,price_mode=excluded.price_mode").bind(id,p.name,p.category,p.description,p.image,p.price,p.old_price,p.active,p.product_type==="key"?p.automatic:0,p.product_type,p.price_mode).run();
   } else if(body.action==="delete") {
    await db().prepare("UPDATE products SET deleted=1,active=0 WHERE id=?").bind(z.string().parse(body.id)).run();
   } else if(body.action==="keys") {
    const id=z.string().parse(body.id),codes=z.array(z.string().min(3).max(300)).min(1).max(200).parse(body.codes);
-   const exists=await db().prepare("SELECT id FROM products WHERE id=? AND deleted=0").bind(id).first();
+   const exists=await db().prepare("SELECT id FROM products WHERE id=? AND deleted=0 AND product_type='key'").bind(id).first();
    if(!exists) throw new Error("Produto não encontrado.");
    if(new Set(codes).size!==codes.length) throw new Error("A lista contém keys duplicadas.");
    await db().batch(codes.map(code=>db().prepare("INSERT INTO keys(id,product_id,code) VALUES(?,?,?)").bind(crypto.randomUUID(),id,code)));
