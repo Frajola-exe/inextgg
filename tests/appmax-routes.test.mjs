@@ -6,11 +6,13 @@ globalThis.__appmaxTestEnv={APPMAX_CLIENT_ID:'merchant',APPMAX_CLIENT_SECRET:'se
 globalThis.__appmaxTestUser={userId:'buyer',email:'buyer@example.com',displayName:'Ana Silva'};
 globalThis.__appmaxTestTasks=[];
 const routes=await import('../app/api/orders/route.ts');
+const admin=await import('../app/api/admin/route.ts');
 const webhook=await import('../app/api/webhooks/pix/route.ts');
 const {reconcile}=await import('../lib/server.ts');
 const originalFetch=globalThis.fetch;
 after(()=>{globalThis.fetch=originalFetch;});
 function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
+ globalThis.__appmaxTestEnv.ADMIN_EMAILS='buyer@example.com';
  const db=new DatabaseSync(':memory:');
  for(const file of readdirSync('drizzle').filter(f=>f.endsWith('.sql')).sort())db.exec(readFileSync(`drizzle/${file}`,'utf8'));
  db.exec("INSERT INTO products(id,name,category,description,image,price) VALUES('p','Game','Steam','','',1000); INSERT INTO keys(id,product_id,code) VALUES('k','p','REAL-KEY')");
@@ -25,7 +27,7 @@ function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
   if(url.endsWith('/v1/customers'))return Response.json({data:{customer:{id:10}}});
   if(url.endsWith('/v1/orders'))return Response.json({data:{order:{id:42,status:'pendente'}}});
   if(url.endsWith('/v1/payments/pix'))return state.pixFailure?Response.json({}, {status:state.pixFailure}):Response.json({data:{payment:{pix_emv:'000201',pix_qrcode:'YWJj',pix_expiration_date:'2026-10-13 15:30:00'}}});
-  if(url.endsWith('/v1/orders/42'))return Response.json({data:state.remoteResponse??{order:{id:42,status:state.status,total_paid:state.paidTotal,amounts:state.amounts},customer:{id:state.customerId,email:'buyer@example.com'},payment:{method:state.method}}});
+  if(url.endsWith('/v1/orders/42'))return Response.json({data:state.remoteResponse??{order:{id:42,status:state.status,total_paid:state.paidTotal,amounts:state.amounts},customer:{id:state.customerId,email:'buyer@example.com'},payment:{method:state.method}},errors:state.lookupErrors});
   throw new Error(`Unexpected endpoint: ${url}`);
  };
  const body={requestKey:crypto.randomUUID(),buyer:{firstName:'Ana',lastName:'Silva',phone:'71999999999',document:'52998224725',ip:'2001:db8::1'},items:[{id:'p',quantity:1}]};
@@ -145,4 +147,50 @@ test('forged cancellation cannot release stock while authenticated status stays 
  await webhook.POST(new Request('https://store.test/api/webhooks/pix',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({event:'order_cancelled',event_type:'order',data:{order_id:42,status:'cancelado'}})}));
  await Promise.all(globalThis.__appmaxTestTasks.splice(0));
  assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,id);s.db.close();
+});
+
+test('Consultar provedor and buyer lookup accept serialized centavos on a one-real Pix',async()=>{
+ const s=setup({paidTotal:'0.00'});
+ s.db.exec("UPDATE products SET price=100 WHERE id='p'");
+ const {id}=await (await s.post()).json();
+ s.state.amounts={sub_total:'100.00',shipping_value:null,discount:null,installment_fee:null};
+ s.state.lookupErrors=[];
+ const consult=()=>admin.POST(new Request('https://store.test/api/admin',{method:'POST',headers:{origin:'https://store.test','content-type':'application/json'},body:JSON.stringify({action:'reconcile',id})}));
+ assert.equal((await consult()).status,200);
+ let order=await (await routes.GET(new Request(`https://store.test/api/orders?id=${id}`))).json();
+ assert.equal(order.reconciliation_error,null);assert.equal(order.qr,'000201');assert.equal(order.status,'pending');assert.deepEqual(order.keys,[]);
+ s.state.status='aprovado';s.state.paidTotal='1.00';
+ assert.equal((await consult()).status,400);
+ assert.equal(s.db.prepare('SELECT delivered_at FROM orders').get().delivered_at,null);
+ s.state.paidTotal='100.00';
+ assert.equal((await consult()).status,200);
+ order=await (await routes.GET(new Request(`https://store.test/api/orders?id=${id}`))).json();
+ assert.equal(order.reconciliation_error,null);assert.equal(order.status,'approved');assert.equal(order.keys[0].code,'REAL-KEY');
+ assert.equal(s.calls.filter(c=>c.url.endsWith('/v1/payments/pix')).length,1);s.db.close();
+});
+
+test('Pix expiry with decimal zero releases the reservation once and never affects a new owner',async()=>{
+ const s=setup();const {id}=await (await s.post()).json();
+ s.state.remoteResponse={order:{id:42,status:'cancelado',total_paid:'0.00'}};
+ const notify=()=>webhook.POST(new Request('https://store.test/api/webhooks/pix',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({event:'order_pix_expired',event_type:'order',data:{order_id:42}})}));
+ assert.equal((await notify()).status,200);await Promise.all(globalThis.__appmaxTestTasks.splice(0));
+ const cancelled=s.db.prepare('SELECT * FROM orders WHERE id=?').get(id);
+ assert.equal(cancelled.status,'cancelled');assert.equal(cancelled.qr,null);assert.equal(cancelled.payment_state,'done');
+ assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,null);
+ s.db.prepare('INSERT INTO orders(id,user_id,email,items,total,request_key,created_at) VALUES(?,?,?,?,?,?,?)').run('replacement','other','other@example.com',cancelled.items,1000,'replacement',Date.now());
+ s.db.exec("UPDATE keys SET order_id='replacement'");
+ assert.equal((await notify()).status,200);await Promise.all(globalThis.__appmaxTestTasks.splice(0));
+ assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,'replacement');
+ assert.equal(s.db.prepare('SELECT count(*) n FROM appmax_webhook_jobs').get().n,0);s.db.close();
+});
+
+test('payment refusal notification releases keys only when Appmax confirms an unpaid terminal status',async()=>{
+ for(const status of ['pendente','cancelado','recusado_por_risco']) {
+  const s=setup({status,paidTotal:'0.00'});const {id}=await (await s.post()).json();
+  const response=await webhook.POST(new Request('https://store.test/api/webhooks/pix',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({event:'payment_not_authorized',event_type:'payment',data:{order_id:42,status:'cancelado',payment_total:0}})}));
+  assert.equal(response.status,200);await Promise.all(globalThis.__appmaxTestTasks.splice(0));
+  assert.ok(s.calls.some(c=>c.url.endsWith('/v1/orders/42')));
+  assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,status==='pendente'?id:null);
+  assert.equal(s.db.prepare('SELECT delivered_at FROM orders').get().delivered_at,null);s.db.close();
+ }
 });

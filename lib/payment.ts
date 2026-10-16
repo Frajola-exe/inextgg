@@ -9,10 +9,10 @@ export function appmaxStatus(status: string): string {
  };
  return statuses[status] || "pending";
 }
-// Accept integer centavos encoded as JSON numbers or digit strings, never reais,
-// decimals, empty strings, booleans or values outside JavaScript's safe range.
+// Amounts stay in the API's centavo unit. A decimal suffix containing only zeros
+// is a serialization detail ("100.00" = 100 centavos), never a reais conversion.
 function centavos(value: unknown): number | null {
- if(typeof value!=="number" && !(typeof value==="string" && /^\d+$/.test(value))) return null;
+ if(typeof value!=="number" && !(typeof value==="string" && /^\d+(?:\.0+)?$/.test(value))) return null;
  const amount=Number(value);
  return Number.isSafeInteger(amount) && amount>=0 ? amount : null;
 }
@@ -37,10 +37,12 @@ export function paymentMismatch(order: any, data: any): string | null {
  if(!order.appmax_customer_id || String(data.customer?.id)!==String(order.appmax_customer_id)) return "identificador do cliente";
  if(typeof data.customer?.email!=="string" || data.customer.email.trim().toLowerCase()!==order.email.trim().toLowerCase()) return "e-mail do cliente";
  if(data.payment?.method && data.payment.method!=="pix") return "forma de pagamento";
- const values=[amounts?.sub_total,amounts?.shipping_value,amounts?.discount,amounts?.installment_fee].map(centavos);
+ // Digital Pix has no shipping, discount or installment fee unless specified.
+ // The subtotal and approved total_paid must still be explicitly supplied.
+ const values=[amounts?.sub_total,amounts?.shipping_value??0,amounts?.discount??0,amounts?.installment_fee??0].map(centavos);
  if(values.some(value=>value===null)) return "formato dos valores";
  const [subtotal,shipping,discount,fee]=values as number[];
- if(subtotal+shipping-discount+fee!==order.total) return "valor do pedido";
+ if(!Number.isSafeInteger(order.total) || BigInt(subtotal)+BigInt(shipping)-BigInt(discount)+BigInt(fee)!==BigInt(order.total)) return "valor do pedido";
  if(appmaxStatus(remote.status)==="approved" && (data.payment?.method!=="pix" || centavos(remote.total_paid)!==order.total)) return "valor pago ou confirmação Pix";
  return null;
 }
@@ -60,7 +62,9 @@ export function pixInstructions(data: any) {
  return {qr,image,expiresAt:timestamp};
 }
 export function webhookOrderId(payload: any): string | null {
- if(payload?.event_type!=="order" || typeof payload.event!=="string" || !payload.event.startsWith("order_")) return null;
+ const orderEvent=payload?.event_type==="order" && typeof payload.event==="string" && payload.event.startsWith("order_");
+ const paymentEvent=payload?.event_type==="payment" && ["payment_not_authorized","payment_authorized_with_delay"].includes(payload.event);
+ if(!orderEvent && !paymentEvent) return null;
  const id=payload.data?.order_id ?? payload.data?.order?.id;
  return (typeof id==="number" && Number.isSafeInteger(id) && id>0) || (typeof id==="string" && /^[1-9]\d{0,15}$/.test(id)) ? String(id) : null;
 }
