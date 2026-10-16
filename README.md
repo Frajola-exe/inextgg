@@ -66,6 +66,14 @@ do deploy. Em D1 existente, aplique `drizzle/0002_product_types.sql`. Produtos
 anteriores recebem o tipo Key de jogo e preço fixo. Serviços e bots não usam
 estoque de keys; itens negociáveis são encaminhados ao atendimento sem Pix automático.
 
+Para versões de jogos, aplique `db/game-versions-migration.sql` em PostgreSQL/Supabase
+ou `drizzle/0003_game_versions.sql` em D1 antes do deploy. No cadastro de uma key
+de jogo, adicione as versões em **Subcategorias / versões do jogo** com nome, preço
+e quantidade obrigatórios. Depois, importe as keys para cada versão na aba Estoque.
+A quantidade define o máximo de keys que podem ser importadas; a vitrine mostra
+apenas as keys realmente disponíveis. Produtos de key já cadastrados sem versões
+continuam com o estoque antigo.
+
 As reservas usam transações e uma trava compartilhada entre instâncias do servidor.
 Essa trava serializa as gravações e pode limitar o volume de pedidos simultâneos.
 

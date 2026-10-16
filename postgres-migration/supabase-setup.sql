@@ -38,15 +38,27 @@ CREATE UNIQUE INDEX orders_payment_id_unique ON orders (payment_id);
 CREATE UNIQUE INDEX orders_request_key_unique ON orders (request_key);
 CREATE INDEX orders_user_created_idx ON orders (user_id, created_at DESC);
 
+CREATE TABLE product_variants (
+  id text PRIMARY KEY,
+  product_id text NOT NULL REFERENCES products (id),
+  name text NOT NULL,
+  price integer NOT NULL CHECK (price > 0),
+  quantity integer NOT NULL CHECK (quantity >= 0),
+  active integer NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+);
+CREATE UNIQUE INDEX product_variants_product_name_unique ON product_variants(product_id,name) WHERE active=1;
+
 CREATE TABLE keys (
   id text PRIMARY KEY,
   product_id text NOT NULL REFERENCES products (id),
   code text NOT NULL,
-  order_id text REFERENCES orders (id)
+  order_id text REFERENCES orders (id),
+  variant_id text REFERENCES product_variants (id)
 );
 CREATE UNIQUE INDEX keys_code_unique ON keys (code);
 CREATE INDEX keys_available_product_idx ON keys (product_id) WHERE order_id IS NULL;
 CREATE INDEX keys_order_idx ON keys (order_id);
+CREATE INDEX keys_variant_available_idx ON keys (variant_id) WHERE order_id IS NULL;
 
 CREATE TABLE settings (
   id text PRIMARY KEY,
@@ -66,9 +78,10 @@ CREATE TABLE appmax_webhook_jobs (
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE product_variants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE appmax_webhook_jobs ENABLE ROW LEVEL SECURITY;
 
 -- Access is through trusted server-side PostgreSQL connections only.
-REVOKE ALL ON TABLE products, orders, keys, settings, appmax_webhook_jobs FROM anon, authenticated;
+REVOKE ALL ON TABLE products, product_variants, orders, keys, settings, appmax_webhook_jobs FROM anon, authenticated;
 COMMIT;

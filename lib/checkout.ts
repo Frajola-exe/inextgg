@@ -10,4 +10,4 @@ export const buyerSchema=z.object({
  firstName:z.string().trim().min(2).max(80),lastName:z.string().trim().min(2).max(100),
  phone:digits.pipe(z.string().regex(/^\d{10,13}$/)),document:digits.refine(validDocument,"Informe um CPF ou CNPJ válido."),ip:z.string().ip()
 });
-export const checkoutSchema=z.object({requestKey:z.string().uuid(),buyer:buyerSchema,items:z.array(z.object({id:z.string().min(1),quantity:z.number().int().min(1).max(5)})).min(1).max(10)});
+export const checkoutSchema=z.object({requestKey:z.string().uuid(),buyer:buyerSchema,items:z.array(z.object({id:z.string().min(1),variantId:z.string().uuid().optional(),quantity:z.number().int().min(1).max(5)})).min(1).max(10)});

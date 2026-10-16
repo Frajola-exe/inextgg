@@ -37,6 +37,42 @@ function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
  return {db,body,post,state,calls};
 }
 function adminAction(body){return admin.POST(new Request('https://store.test/api/admin',{method:'POST',headers:{origin:'https://store.test','content-type':'application/json'},body:JSON.stringify(body)}));}
+test('admin versions require complete fields and checkout reserves the selected edition at its own price',async()=>{
+ const s=setup();
+ const product={id:'versions',name:'Edition Game',product_type:'key',price_mode:'fixed',category:'Steam',description:'Game editions',image:'',price:0,old_price:0,active:1,automatic:1,variants:[{name:'Standard',price:1200,quantity:1},{name:'Deluxe',price:2400,quantity:2}]};
+ assert.equal((await adminAction({action:'product',product:{...product,variants:[{name:'Standard',price:0,quantity:1}]}})).status,400);
+ assert.equal((await adminAction({action:'product',product:{...product,variants:[{name:'Standard',price:1200,quantity:0}]}})).status,400);
+ assert.equal((await adminAction({action:'product',product})).status,200);
+ const versions=s.db.prepare('SELECT * FROM product_variants WHERE product_id=? ORDER BY name').all('versions');
+ const deluxe=versions[0],standard=versions[1];
+ assert.equal((await adminAction({action:'keys',id:'versions',codes:['UNASSIGNED']})).status,400);
+ assert.equal((await adminAction({action:'keys',id:'versions',variantId:standard.id,codes:['STANDARD-KEY','EXTRA']})).status,400);
+ assert.equal((await adminAction({action:'keys',id:'versions',variantId:standard.id,codes:['STANDARD-KEY']})).status,200);
+ assert.equal((await adminAction({action:'keys',id:'versions',variantId:deluxe.id,codes:['DELUXE-KEY']})).status,200);
+ const catalog=await (await store.GET()).json();
+ assert.equal(catalog.products.find(p=>p.id==='versions').variants.find(v=>v.id===standard.id).stock,1);
+ s.body.items=[{id:'versions',variantId:deluxe.id,quantity:1}];
+ const response=await s.post();assert.equal(response.status,200);
+ const order=s.db.prepare('SELECT * FROM orders WHERE id=?').get((await response.json()).id);
+ assert.equal(order.total,2400);
+ assert.equal(JSON.parse(order.items)[0].name,'Edition Game — Deluxe');
+ assert.equal(s.db.prepare('SELECT order_id FROM keys WHERE variant_id=?').get(deluxe.id).order_id,order.id);
+ assert.equal(s.db.prepare('SELECT order_id FROM keys WHERE variant_id=?').get(standard.id).order_id,null);
+ s.body.requestKey=crypto.randomUUID();s.body.items=[{id:'versions',quantity:1}];
+ assert.equal((await s.post()).status,400);
+ s.db.close();
+});
+test('existing key stock moves to the first version when editions are added',async()=>{
+ const s=setup();
+ const product={id:'p',name:'Game',product_type:'key',price_mode:'fixed',category:'Steam',description:'',image:'',price:1000,old_price:0,active:1,automatic:1,variants:[{name:'Standard',price:1500,quantity:1}]};
+ assert.equal((await adminAction({action:'product',product})).status,200);
+ const variant=s.db.prepare("SELECT id FROM product_variants WHERE product_id='p'").get();
+ assert.equal(s.db.prepare("SELECT variant_id FROM keys WHERE id='k'").get().variant_id,variant.id);
+ s.body.items=[{id:'p',variantId:variant.id,quantity:1}];
+ assert.equal((await s.post()).status,200);
+ assert.equal(s.db.prepare('SELECT total FROM orders').get().total,1500);
+ s.db.close();
+});
 test('admin creates services and bots without key stock, supports fixed checkout and negotiable contact',async()=>{
  for(const productType of ['service','bot']) {
   const s=setup();
