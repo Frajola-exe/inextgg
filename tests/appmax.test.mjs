@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createAppmaxClient,appmaxReady,AppmaxError} from '../lib/appmax.ts';
-import {paymentMatches,appmaxStatus,pixInstructions,webhookOrderId} from '../lib/payment.ts';
+import {paymentMatches,cancellationMismatch,appmaxStatus,pixInstructions,webhookOrderId} from '../lib/payment.ts';
 import {buyerSchema} from '../lib/checkout.ts';
 const config={APPMAX_CLIENT_ID:'merchant',APPMAX_CLIENT_SECRET:'secret',APPMAX_EXTERNAL_ID:'installation',APPMAX_ENVIRONMENT:'sandbox'};
 const order={payment_provider:'appmax',payment_id:'42',appmax_customer_id:'10',email:'buyer@example.com',total:1000};
@@ -14,11 +14,32 @@ test('Appmax approval requires stored order, customer, email, exact centavos and
  assert.equal(paymentMatches({...order,payment_provider:'legacy'},payment),false);
 });
 
-test('integer centavo strings reconcile without accepting reais or coercion of invalid amounts',()=>{
+test('whole centavo strings reconcile without accepting reais or coercion of invalid amounts',()=>{
  assert.equal(paymentMatches(order,{...payment,order:{...payment.order,total_paid:'1000',amounts:{sub_total:'1000',shipping_value:'0',discount:'0',installment_fee:'0'}}}),true);
- for(const value of ['10.00','1000.00','',null,true,-1,'1e3','9007199254740993']) {
+ assert.equal(paymentMatches(order,{...payment,order:{...payment.order,total_paid:'1000.00',amounts:{sub_total:'1000.00',shipping_value:'0.00',discount:'0.00',installment_fee:'0.00'}}}),true);
+ for(const value of ['10.00','1000.01','1000,00','',null,true,-1,'1e3','9007199254740993','9007199254740991.01']) {
   assert.equal(paymentMatches(order,{...payment,order:{...payment.order,amounts:{...payment.order.amounts,sub_total:value}}}),false);
   assert.equal(paymentMatches(order,{...payment,order:{...payment.order,total_paid:value}}),false);
+ }
+});
+
+test('digital Pix defaults only missing shipping, discount and installment fee to zero',()=>{
+ for(const amounts of [{sub_total:1000},{sub_total:'1000.00',shipping_value:null,discount:null,installment_fee:null}]) {
+  assert.equal(paymentMatches(order,{...payment,order:{...payment.order,amounts}}),true);
+ }
+ for(const amounts of [undefined,{},null,{sub_total:null},{sub_total:1000,shipping_value:''},{sub_total:1000,discount:false},{sub_total:1000,installment_fee:'invalid'}]) {
+  assert.equal(paymentMatches(order,{...payment,order:{...payment.order,amounts}}),false);
+ }
+ assert.equal(paymentMatches(order,{...payment,order:{...payment.order,amounts:{sub_total:1100,discount:100}}}),true);
+ assert.equal(paymentMatches(order,{...payment,order:{...payment.order,amounts:{sub_total:1000,shipping_value:1}}}),false);
+});
+
+test('unpaid cancellation accepts decimal serialization of zero but rejects fractional or positive paid values',()=>{
+ for(const total_paid of [0,'0','0.00',null,undefined]) {
+  assert.equal(cancellationMismatch(order,{order:{id:42,status:'cancelado',total_paid}}),null);
+ }
+ for(const total_paid of [1,'0.01','1.00',false,'']) {
+  assert.ok(cancellationMismatch(order,{order:{id:42,status:'cancelado',total_paid}}));
  }
 });
 test('pending order can have no payment; refunds still require order identity and amounts',()=>{assert.equal(paymentMatches(order,{...payment,order:{...payment.order,status:'pendente',total_paid:0},payment:null}),true);assert.equal(paymentMatches(order,{...payment,order:{...payment.order,status:'estornado'}}),true);});
@@ -30,11 +51,31 @@ test('Pix parser uses documented API fields and Brasília expiration; supports g
  assert.equal(pixInstructions({payment:{pix_emv:'x',pix_qrcode:'javascript:alert(1)',pix_expiration_date:'bad'}}),null);
 });
 test('unsigned webhook only extracts a known order event and never approves payment',()=>{assert.equal(webhookOrderId({event:'order_paid_by_pix',event_type:'order',data:{order_id:42,status:'aprovado',total:1}}),'42');for(const payload of [{event:'order_paid',event_type:'subscription',data:{order_id:42}},{event:'order_paid',event_type:'order',data:{order_id:'../1'}},{}])assert.equal(webhookOrderId(payload),null);});
+
+test('payment authorization notifications trigger the same authenticated order lookup',()=>{
+ for(const event of ['payment_not_authorized','payment_authorized_with_delay']) {
+  assert.equal(webhookOrderId({event,event_type:'payment',data:{order_id:42}}),'42');
+ }
+ for(const event of ['order_paid','payment_unknown']) {
+  assert.equal(webhookOrderId({event,event_type:'payment',data:{order_id:42}}),null);
+ }
+});
 test('buyer validates document checksums and required data',()=>{const buyer={firstName:'Ana',lastName:'Silva',phone:'(71) 99999-9999',document:'529.982.247-25',ip:'2001:db8::1'};const result=buyerSchema.parse(buyer);assert.equal(result.document,'52998224725');assert.equal(result.phone,'71999999999');for(const patch of [{document:'11111111111'},{document:'52998224724'},{ip:''},{lastName:''}])assert.equal(buyerSchema.safeParse({...buyer,...patch}).success,false);});
 test('OAuth uses merchant credentials; token reused; commerce uses sandbox and centavos',async()=>{
  const calls=[];const client=createAppmaxClient(config,async(url,init)=>{calls.push({url,init});return url.includes('/oauth2/token')?json({access_token:'access',expires_in:3600}):json({data:{order:{id:42}}});});
  await client('/v1/orders',{method:'POST',body:JSON.stringify({products_value:1000})});await client('/v1/orders/42');
  assert.equal(calls.length,3);assert.equal(calls[0].url,'https://auth.sandboxappmax.com.br/oauth2/token');assert.equal(calls[0].init.body.get('client_secret'),'secret');assert.equal(calls[1].init.headers.Authorization,'Bearer access');assert.equal(JSON.parse(calls[1].init.body).products_value,1000);assert.equal(calls[1].url,'https://api.sandboxappmax.com.br/v1/orders');
+});
+
+test('empty error containers in successful responses do not discard existing payment data',async()=>{
+ for(const errors of [null,[],{}]) {
+  const client=createAppmaxClient(config,async url=>url.includes('/oauth2/token')?json({access_token:'token'}):json({data:{order:{id:42}},errors}));
+  assert.deepEqual(await client('/v1/orders/42'),{order:{id:42}});
+ }
+ for(const errors of [['invalid'],{message:'invalid'}]) {
+  const client=createAppmaxClient(config,async url=>url.includes('/oauth2/token')?json({access_token:'token'}):json({data:{order:{id:42}},errors}));
+  await assert.rejects(client('/v1/orders/42'),AppmaxError);
+ }
 });
 test('401 refreshes token once; network and 5xx commerce errors have uncertain outcomes',async()=>{
  let tokens=0,queries=0;const client=createAppmaxClient(config,async url=>url.includes('/oauth2/token')?json({access_token:`token${++tokens}`}):++queries===1?json({},401):json({data:{order:{id:42}}}));await client('/v1/orders/42');assert.equal(tokens,2);assert.equal(queries,2);

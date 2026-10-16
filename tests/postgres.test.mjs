@@ -56,8 +56,9 @@ test('Vercel lazily reads DATABASE_URL and reuses its PostgreSQL pool', async ()
   }
 });
 
-test('PostgreSQL supports catalog, Appmax reservation, rollback and payment updates', async () => {
+test('PostgreSQL supports catalog, Appmax reservation, cancellation, delivery and rollback', async () => {
   const engine = new PGlite();
+  const originalFetch = globalThis.fetch;
   async function query(input) {
     const sql = typeof input === 'string' ? input : input.text;
     // PGlite has a single connection; lock acquisition is covered by adapter tests.
@@ -117,5 +118,29 @@ test('PostgreSQL supports catalog, Appmax reservation, rollback and payment upda
     assert.equal(await db.prepare('SELECT * FROM keys WHERE id=?').bind('new').first(), null);
     await db.prepare("INSERT INTO settings(id,value) VALUES('store',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind('{"automatic":true}').run();
     assert.deepEqual(JSON.parse(await db.prepare("SELECT value FROM settings WHERE id='store'").first('value')), { automatic: true });
-  } finally { await engine.close(); }
+    Object.assign(globalThis.__appmaxTestEnv, { APPMAX_CLIENT_ID: 'merchant', APPMAX_CLIENT_SECRET: 'secret', APPMAX_ENVIRONMENT: 'sandbox', APPMAX_EXTERNAL_ID: 'installation' });
+    const { reconcile } = await import('../lib/server.ts');
+    let remote = { order: { id: 42, status: 'cancelado', total_paid: '0.00' } };
+    globalThis.fetch = async url => Response.json(url.includes('/oauth2/token') ? { access_token: 'test-token' } : { data: remote, errors: [] });
+    await db.prepare("UPDATE orders SET payment_id='42',appmax_customer_id='10',payment_state='done',status='pending',qr='000201',qr_image='image' WHERE id='first'").run();
+    await reconcile(await db.prepare("SELECT * FROM orders WHERE id='first'").first());
+    const cancelled = await db.prepare("SELECT * FROM orders WHERE id='first'").first();
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal(cancelled.qr, null);
+    assert.equal(cancelled.pix_expires_at, null);
+    assert.equal(await db.prepare("SELECT order_id FROM keys WHERE id='k'").first('order_id'), null);
+    await reserve('replacement');
+    await reconcile(cancelled);
+    assert.equal(await db.prepare("SELECT order_id FROM keys WHERE id='k'").first('order_id'), 'replacement');
+    await db.prepare("UPDATE orders SET payment_id='43',appmax_customer_id='10',payment_state='done',status='pending' WHERE id='replacement'").run();
+    remote = { order: { id: 43, status: 'aprovado', total_paid: '1000.00', amounts: { sub_total: '1000.00', installment_fee: null } }, customer: { id: 10, email: 'buyer@example.com' }, payment: { method: 'pix' } };
+    await reconcile(await db.prepare("SELECT * FROM orders WHERE id='replacement'").first());
+    const delivered = await db.prepare("SELECT * FROM orders WHERE id='replacement'").first();
+    assert.equal(delivered.status, 'approved');
+    assert.ok(delivered.paid_at);
+    assert.ok(delivered.delivered_at);
+    remote = { order: { id: 43, status: 'cancelado', total_paid: '0.00' } };
+    await assert.rejects(reconcile(delivered), /pagamento ou entrega registrados/);
+    assert.equal(await db.prepare("SELECT order_id FROM keys WHERE id='k'").first('order_id'), 'replacement');
+  } finally { globalThis.fetch = originalFetch; await engine.close(); }
 });
