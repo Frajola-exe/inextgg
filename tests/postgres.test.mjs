@@ -15,6 +15,12 @@ test('existing PostgreSQL products migrate to key and fixed defaults', async () 
     await engine.exec(await readFile(new URL('../db/product-types-migration.sql', import.meta.url), 'utf8'));
     const { rows } = await engine.query("SELECT product_type, price_mode FROM products WHERE id='old'");
     assert.deepEqual(rows[0], { product_type: 'key', price_mode: 'fixed' });
+    await engine.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE TABLE keys(id text PRIMARY KEY, product_id text REFERENCES products(id), order_id text);');
+    await engine.exec(await readFile(new URL('../db/game-versions-migration.sql', import.meta.url), 'utf8'));
+    const variants=await engine.query("SELECT rowsecurity FROM pg_tables WHERE tablename='product_variants'");
+    assert.equal(variants.rows[0].rowsecurity,true);
+    await engine.exec("INSERT INTO product_variants(id,product_id,name,price,quantity) VALUES('standard','old','Standard',1000,1)");
+    await engine.exec("INSERT INTO keys(id,product_id,variant_id) VALUES('key','old','standard')");
   } finally { await engine.close(); }
 });
 
@@ -81,7 +87,7 @@ test('PostgreSQL supports catalog, Appmax reservation, cancellation, delivery an
     await engine.exec('CREATE ROLE anon; CREATE ROLE authenticated;');
     await engine.exec(await readFile(new URL('../db/postgresql.sql', import.meta.url), 'utf8'));
     const tables = await engine.query("SELECT rowsecurity FROM pg_tables WHERE schemaname='public'");
-    assert.equal(tables.rows.length, 5);
+    assert.equal(tables.rows.length, 6);
     assert.ok(tables.rows.every(row => row.rowsecurity));
     globalThis.__appmaxTestEnv = { DB: db };
     globalThis.__appmaxTestUser = null;

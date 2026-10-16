@@ -19,7 +19,11 @@ export const orders = sqliteTable("orders", {
 });
 export const keys = sqliteTable("keys", {
  id: text("id").primaryKey(), productId: text("product_id").notNull().references(()=>products.id),
- code: text("code").notNull().unique(), orderId: text("order_id").references(()=>orders.id)
+ code: text("code").notNull().unique(), orderId: text("order_id").references(()=>orders.id), variantId:text("variant_id").references(()=>productVariants.id)
+});
+export const productVariants = sqliteTable("product_variants", {
+ id:text("id").primaryKey(), productId:text("product_id").notNull().references(()=>products.id),
+ name:text("name").notNull(),price:integer("price").notNull(),quantity:integer("quantity").notNull(),active:integer("active").notNull().default(1)
 });
 export const settings = sqliteTable("settings", { id: text("id").primaryKey(), value: text("value").notNull() });
 export const webhookJobs = sqliteTable("appmax_webhook_jobs", {orderId:text("order_id").primaryKey().references(()=>orders.id),receivedAt:integer("received_at").notNull()});

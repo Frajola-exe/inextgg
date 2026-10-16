@@ -15,7 +15,7 @@ export async function GET(request:Request) {
    try {await reconcile(o);} catch(error) {reconciliationError=error instanceof PaymentMismatchError?error.message:"Não foi possível confirmar o pagamento. Consulte novamente ou fale com o atendimento informando o número do pedido. Nenhuma nova cobrança foi criada.";}
    o=await db().prepare("SELECT * FROM orders WHERE id=?").bind(id).first<any>();
   }
-  const keys=!reconciliationError && o.status==="approved" && o.delivered_at ? (await db().prepare("SELECT k.code,p.name FROM keys k JOIN products p ON p.id=k.product_id WHERE k.order_id=?").bind(id).all()).results : [];
+  const keys=!reconciliationError && o.status==="approved" && o.delivered_at ? (await db().prepare("SELECT k.code,p.name,v.name variant_name FROM keys k JOIN products p ON p.id=k.product_id LEFT JOIN product_variants v ON v.id=k.variant_id WHERE k.order_id=?").bind(id).all()).results : [];
   return Response.json({...o,keys,reconciliation_error:reconciliationError,settings:await config()},{headers:{"Cache-Control":"private, no-store"}});
  }catch(e){return failure(e);}
 }
@@ -24,14 +24,17 @@ export async function POST(request:Request) {
   sameOrigin(request); const user=await identity();
   if(!pixReady()) throw new Error("Pix Appmax ainda não configurado. Nenhuma cobrança foi realizada.");
   const body=checkoutSchema.parse(await request.json());
-  if(new Set(body.items.map(i=>i.id)).size!==body.items.length) throw new Error("Produtos duplicados.");
+  if(new Set(body.items.map(i=>`${i.id}:${i.variantId||""}`)).size!==body.items.length) throw new Error("Produtos duplicados.");
   const requestKey=`${user.userId}:${body.requestKey}`;
   let order=await db().prepare("SELECT * FROM orders WHERE request_key=?").bind(requestKey).first<any>();
   if(!order) {
    const products=await Promise.all(body.items.map(i=>db().prepare("SELECT * FROM products WHERE id=? AND active=1 AND deleted=0").bind(i.id).first<any>()));
    if(products.some(p=>!p)) throw new Error("Produto indisponível.");
    if(products.some((p,i)=>p.price_mode!=="fixed" || p.price<1 || (p.product_type!=="key" && body.items[i].quantity!==1))) throw new Error("Produto indisponível para compra direta.");
-   const items=products.map((p,i)=>({id:p.id,name:p.name,price:p.price,quantity:body.items[i].quantity,automatic:p.automatic,product_type:p.product_type}));
+   const variants=await Promise.all(body.items.map((i,index)=>db().prepare("SELECT id,name,price FROM product_variants WHERE product_id=? AND active=1 AND id=?").bind(i.id,i.variantId||"").first<any>()));
+   const counts=await Promise.all(body.items.map(i=>db().prepare("SELECT COUNT(*) n FROM product_variants WHERE product_id=? AND active=1").bind(i.id).first<{n:number}>()));
+   if(body.items.some((i,index)=>Boolean(counts[index]?.n)!==Boolean(i.variantId) || i.variantId && !variants[index])) throw new Error("Selecione uma versão válida do jogo.");
+   const items=products.map((p,i)=>({id:p.id,name:variants[i]?`${p.name} — ${variants[i].name}`:p.name,price:variants[i]?.price??p.price,quantity:body.items[i].quantity,automatic:p.automatic,product_type:p.product_type,variantId:variants[i]?.id}));
    const total=items.reduce((sum,i)=>sum+i.price*i.quantity,0),id=crypto.randomUUID();
    try {await db().batch(reservationStatements({id,userId:user.userId,email:user.email,requestKey,createdAt:Date.now(),items}).map(s=>db().prepare(s.sql).bind(...s.values)));}
    catch(error) {if(!await db().prepare("SELECT id FROM orders WHERE request_key=?").bind(requestKey).first()) throw error;}
@@ -56,7 +59,7 @@ export async function POST(request:Request) {
    }
    if(!order.payment_id) {
     stage="order";
-    const remote=await appmax("/v1/orders",{method:"POST",body:JSON.stringify({customer_id:Number(order.appmax_customer_id),products_value:order.total,shipping_value:0,discount_value:0,products:JSON.parse(order.items).map((i:any)=>({sku:i.id,name:i.name,quantity:i.quantity,unit_value:i.price,type:"digital"}))})});
+    const remote=await appmax("/v1/orders",{method:"POST",body:JSON.stringify({customer_id:Number(order.appmax_customer_id),products_value:order.total,shipping_value:0,discount_value:0,products:JSON.parse(order.items).map((i:any)=>({sku:i.variantId||i.id,name:i.name,quantity:i.quantity,unit_value:i.price,type:"digital"}))})});
     if(!remote.order?.id) throw new Error("A Appmax não retornou o pedido.");
     order.payment_id=String(remote.order.id);
     await db().prepare("UPDATE orders SET payment_id=? WHERE id=?").bind(order.payment_id,order.id).run();
