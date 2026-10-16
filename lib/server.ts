@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { currentUser, isAdmin, AuthError } from "./auth";
-import { paymentMatches, appmaxStatus, pixInstructions } from "./payment";
+import { paymentMismatch, appmaxStatus, pixInstructions } from "./payment";
 import { createAppmaxClient, appmaxReady } from "./appmax";
 export function db() { if(!env.DB) throw new Error("Banco indisponível."); return env.DB; }
 export async function identity(admin=false) {
@@ -29,10 +29,14 @@ export async function fulfill(id:string, manual=false) {
  await db().prepare("UPDATE orders SET delivered_at=? WHERE id=? AND status='approved' AND delivered_at IS NULL").bind(Date.now(),id).run();
 }
 export async function reconcile(order:any) {
+ // Old checkout failures may still hold stock despite never creating a Pix.
+ // Release only the recorded safe-to-retry state; unknown outcomes stay reserved.
+ await db().prepare("UPDATE keys SET order_id=NULL WHERE order_id=? AND EXISTS(SELECT 1 FROM orders WHERE id=? AND payment_provider='appmax' AND payment_state='idle' AND paid_at IS NULL AND qr IS NULL AND status IN ('creating','pending'))").bind(order.id,order.id).run();
  if(!order.payment_id) return;
  if(order.payment_provider!=="appmax") throw new Error("Pedido anterior à integração Appmax. Consulte o atendimento para verificar este pagamento.");
  const payment=await appmax(`/v1/orders/${encodeURIComponent(order.payment_id)}`);
- if(!paymentMatches(order,payment)) throw new Error("Dados do pagamento não correspondem ao pedido.");
+ const mismatch=paymentMismatch(order,payment);
+ if(mismatch) throw new Error(`Dados do pagamento não correspondem ao pedido (${mismatch}). Consulte o atendimento com o número do pedido.`);
  const status=appmaxStatus(payment.order.status);
  const pix=pixInstructions(payment);
  if(pix) await db().prepare("UPDATE orders SET qr=?,qr_image=?,pix_expires_at=?,payment_state='done' WHERE id=?").bind(pix.qr,pix.image,pix.expiresAt,order.id).run();

@@ -9,7 +9,7 @@ export async function GET() {
    const jobs=await db().prepare("SELECT o.* FROM appmax_webhook_jobs j JOIN orders o ON o.id=j.order_id ORDER BY j.received_at LIMIT 5").all<any>();
    waitUntil(Promise.allSettled(jobs.results.map(order=>reconcile(order))));
   }
-  const products=await db().prepare("SELECT p.*, (SELECT COUNT(*) FROM keys k WHERE k.product_id=p.id AND k.order_id IS NULL) stock FROM products p WHERE deleted=0").all();
+  const products=await db().prepare("SELECT p.*, (SELECT COUNT(*) FROM keys k WHERE k.product_id=p.id AND k.order_id IS NULL) stock, (SELECT COUNT(*) FROM keys k JOIN orders o ON o.id=k.order_id WHERE k.product_id=p.id AND o.delivered_at IS NULL) reserved FROM products p WHERE deleted=0").all();
   const orders=await db().prepare("SELECT id,email,items,total,status,created_at,paid_at,delivered_at FROM orders ORDER BY created_at DESC LIMIT 5000").all();
   return Response.json({products:products.results,orders:orders.results,settings:await config(),email:user.email,provider:user.userId.startsWith("supabase:")?"supabase":"sites",pixReady:pixReady()},{headers:{"Cache-Control":"private, no-store"}});
  }catch(e){return failure(e);}

@@ -7,6 +7,7 @@ globalThis.__appmaxTestUser={userId:'buyer',email:'buyer@example.com',displayNam
 globalThis.__appmaxTestTasks=[];
 const routes=await import('../app/api/orders/route.ts');
 const webhook=await import('../app/api/webhooks/pix/route.ts');
+const {reconcile}=await import('../lib/server.ts');
 const originalFetch=globalThis.fetch;
 after(()=>{globalThis.fetch=originalFetch;});
 function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
@@ -14,16 +15,17 @@ function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
  for(const file of readdirSync('drizzle').filter(f=>f.endsWith('.sql')).sort())db.exec(readFileSync(`drizzle/${file}`,'utf8'));
  db.exec("INSERT INTO products(id,name,category,description,image,price) VALUES('p','Game','Steam','','',1000); INSERT INTO keys(id,product_id,code) VALUES('k','p','REAL-KEY')");
  function prepare(sql){let values=[];return {bind(...args){values=args;return this;},async first(){return db.prepare(sql).get(...values)||null;},async all(){return {results:db.prepare(sql).all(...values)};},async run(){const result=db.prepare(sql).run(...values);return {meta:{changes:result.changes}};}};}
- globalThis.__appmaxTestEnv.DB={prepare,async batch(statements){db.exec('BEGIN');try{const results=[];for(const s of statements)results.push(await s.run());db.exec('COMMIT');return results;}catch(e){db.exec('ROLLBACK');throw e;}}};
+ let queue=Promise.resolve();
+ globalThis.__appmaxTestEnv.DB={prepare,batch(statements){const operation=queue.then(async()=>{db.exec('BEGIN');try{const results=[];for(const s of statements)results.push(await s.run());db.exec('COMMIT');return results;}catch(e){db.exec('ROLLBACK');throw e;}});queue=operation.catch(()=>{});return operation;}};
  const calls=[];
- const state={status,paidTotal,method,pixFailure};
+ const state={status,paidTotal,method,pixFailure,customerId:10,amounts:{sub_total:1000,shipping_value:0,discount:0,installment_fee:0}};
  globalThis.fetch=async(url,init)=>{
   calls.push({url,body:init?.body});
   if(url.includes('/oauth2/token'))return Response.json({access_token:'test-token',expires_in:3600});
   if(url.endsWith('/v1/customers'))return Response.json({data:{customer:{id:10}}});
   if(url.endsWith('/v1/orders'))return Response.json({data:{order:{id:42,status:'pendente'}}});
   if(url.endsWith('/v1/payments/pix'))return state.pixFailure?Response.json({}, {status:state.pixFailure}):Response.json({data:{payment:{pix_emv:'000201',pix_qrcode:'YWJj',pix_expiration_date:'2026-10-13 15:30:00'}}});
-  if(url.endsWith('/v1/orders/42'))return Response.json({data:{order:{id:42,status:state.status,total_paid:state.paidTotal,amounts:{sub_total:1000,shipping_value:0,discount:0,installment_fee:0}},customer:{id:10,email:'buyer@example.com'},payment:{method:state.method}}});
+  if(url.endsWith('/v1/orders/42'))return Response.json({data:{order:{id:42,status:state.status,total_paid:state.paidTotal,amounts:state.amounts},customer:{id:state.customerId,email:'buyer@example.com'},payment:{method:state.method}}});
   throw new Error(`Unexpected endpoint: ${url}`);
  };
  const body={requestKey:crypto.randomUUID(),buyer:{firstName:'Ana',lastName:'Silva',phone:'71999999999',document:'52998224725',ip:'2001:db8::1'},items:[{id:'p',quantity:1}]};
@@ -44,3 +46,49 @@ test('definite validation rejection can retry on the same remote order',async()=
 test('parallel checkout requests cannot generate two Pix charges',async()=>{const s=setup();const result=await Promise.all([s.post(),s.post()]);assert.ok(result.every(r=>r.status===200));assert.equal(s.calls.filter(c=>c.url.endsWith('/v1/payments/pix')).length,1);assert.equal(s.db.prepare('SELECT count(*) n FROM orders').get().n,1);s.db.close();});
 test('forged paid webhook cannot deliver a key while Appmax reports pending',async()=>{const s=setup();await s.post();const response=await webhook.POST(new Request('https://store.test/api/webhooks/pix',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({event:'order_paid_by_pix',event_type:'order',data:{order_id:42,status:'aprovado',total:1000}})}));assert.equal(response.status,200);await Promise.all(globalThis.__appmaxTestTasks.splice(0));assert.equal(s.db.prepare('SELECT paid_at,delivered_at FROM orders').get().paid_at,null);assert.equal(s.db.prepare('SELECT delivered_at FROM orders').get().delivered_at,null);s.db.close();});
 test('Appmax wrong paid amount blocks delivery and leaves webhook available for recovery',async()=>{const s=setup();await s.post();s.state.status='aprovado';s.state.paidTotal=10;await webhook.POST(new Request('https://store.test/api/webhooks/pix',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({event:'order_approved',event_type:'order',data:{order_id:42}})}));await Promise.all(globalThis.__appmaxTestTasks.splice(0));assert.equal(s.db.prepare('SELECT delivered_at FROM orders').get().delivered_at,null);assert.equal(s.db.prepare('SELECT count(*) n FROM appmax_webhook_jobs').get().n,1);s.db.close();});
+
+test('definite Pix rejection releases stock and retry reacquires it before charging',async()=>{
+ const s=setup({pixFailure:422});
+ assert.equal((await s.post()).status,400);
+ assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,null);
+ s.state.pixFailure=0;
+ const retry=await s.post();assert.equal(retry.status,200);
+ const {id}=await retry.json();assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,id);
+ s.state.status='aprovado';
+ const response=await routes.GET(new Request(`https://store.test/api/orders?id=${id}`));
+ assert.equal((await response.json()).keys[0].code,'REAL-KEY');s.db.close();
+});
+
+test('retry without available stock never creates another payment',async()=>{
+ const s=setup({pixFailure:422});await s.post();
+ s.db.exec('DELETE FROM keys');s.state.pixFailure=0;
+ assert.equal((await s.post()).status,400);
+ assert.equal(s.calls.filter(c=>c.url.endsWith('/v1/payments/pix')).length,1);
+ assert.equal(s.db.prepare('SELECT payment_state FROM orders').get().payment_state,'idle');s.db.close();
+});
+
+test('admin reconciliation recovers historical reservations only when no Pix was created',async()=>{
+ const s=setup({pixFailure:422});await s.post();
+ const order=s.db.prepare('SELECT * FROM orders').get();
+ // Simulate the reservation left by the checkout before this fix.
+ s.db.prepare('UPDATE keys SET order_id=?').run(order.id);
+ await reconcile(order);
+ assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,null);
+ s.db.prepare("UPDATE orders SET payment_state='unknown' WHERE id=?").run(order.id);
+ s.db.prepare('UPDATE keys SET order_id=?').run(order.id);
+ await reconcile(s.db.prepare('SELECT * FROM orders').get());
+ assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,order.id);s.db.close();
+});
+
+test('mismatch preserves accessible Pix and reservation, then approval recovers the same order',async()=>{
+ const s=setup();const {id}=await (await s.post()).json();s.state.customerId=99;
+ const response=await routes.GET(new Request(`https://store.test/api/orders?id=${id}`));
+ assert.equal(response.status,200);const pending=await response.json();
+ assert.equal(pending.id,id);assert.equal(pending.qr,'000201');assert.ok(pending.reconciliation_error);
+ assert.deepEqual(pending.keys,[]);assert.equal(s.db.prepare('SELECT order_id FROM keys').get().order_id,id);
+ await s.post();assert.equal(s.calls.filter(c=>c.url.endsWith('/v1/payments/pix')).length,1);
+ s.state.customerId=10;s.state.status='aprovado';s.state.paidTotal='1000';
+ s.state.amounts={sub_total:'1000',shipping_value:'0',discount:'0',installment_fee:'0'};
+ const recovered=await (await routes.GET(new Request(`https://store.test/api/orders?id=${id}`))).json();
+ assert.equal(recovered.reconciliation_error,null);assert.equal(recovered.keys[0].code,'REAL-KEY');s.db.close();
+});
