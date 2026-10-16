@@ -22,7 +22,8 @@ export function createAppmaxClient(config:AppmaxConfig, transport:typeof fetch=f
   async function send() {return transport(`https://api.${host}${path}`,{...init,headers:{...Object.fromEntries(new Headers(init.headers)),Authorization:`Bearer ${token}`,"Content-Type":"application/json",Accept:"application/json"},signal:AbortSignal.timeout(8000)});}
   let response:Response;
   try {response=await send();if(response.status===401){await authenticate();response=await send();}}catch(error){if(error instanceof AppmaxError)throw error;throw new AppmaxError("A Appmax não respondeu. Consulte o pedido antes de tentar outra cobrança.");}
-  if(!response.ok) throw new AppmaxError(`A Appmax recusou a operação (HTTP ${response.status}). Confira os dados e a configuração.`,[400,401,403,404,422,429].includes(response.status));
+  // HTTP 400 can mean "order already paid"; it does not prove no charge exists.
+  if(!response.ok) throw new AppmaxError(`A Appmax recusou a operação (HTTP ${response.status}). Confira os dados e a configuração.`,[401,403,404,422,429].includes(response.status));
   try {const body:any=await response.json();if(!body.data || body.error || body.errors)throw new Error();return body.data;}catch{throw new AppmaxError("A Appmax retornou uma resposta inesperada. Consulte o pedido antes de tentar outra cobrança.");}
  };
 }

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import pg from 'pg';
 import { createDatabase } from '../lib/postgres-adapter.mjs';
-import { reservationStatements } from '../lib/inventory.ts';
+import { reservationStatements, retryReservationStatements } from '../lib/inventory.ts';
 import { postgresPoolOptions } from '../lib/postgres.mjs';
 import { rootCertificates, createSecureContext } from 'node:tls';
 
@@ -99,8 +99,12 @@ test('PostgreSQL supports catalog, Appmax reservation, rollback and payment upda
     assert.equal(order.created_at, 1791936000000);
     assert.equal(order.payment_provider, 'appmax');
     assert.equal(order.payment_state, 'idle');
-    const claim = await db.prepare("UPDATE orders SET payment_state='processing' WHERE id=? AND payment_state='idle'").bind('first').run();
+    // A definite Pix rejection returns stock; a retry must reserve it again.
+    await db.prepare('UPDATE keys SET order_id=NULL WHERE order_id=?').bind('first').run();
+    const attempt = await db.batch(retryReservationStatements(order).map(s=>db.prepare(s.sql).bind(...s.values)));
+    const claim = attempt.at(-1);
     assert.equal(claim.meta.changes, 1);
+    assert.equal(await db.prepare('SELECT order_id FROM keys').first('order_id'), 'first');
     assert.equal((await db.prepare("UPDATE orders SET payment_state='processing' WHERE id=? AND payment_state='idle'").bind('first').run()).meta.changes, 0);
     await db.prepare("UPDATE orders SET pix_expires_at=? WHERE id=?").bind(1791936600000, 'first').run();
     assert.equal(await db.prepare('SELECT pix_expires_at FROM orders').first('pix_expires_at'), 1791936600000);

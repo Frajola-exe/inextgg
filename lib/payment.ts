@@ -9,15 +9,28 @@ export function appmaxStatus(status: string): string {
  };
  return statuses[status] || "pending";
 }
-export function paymentMatches(order: any, data: any) {
+// Accept integer centavos encoded as JSON numbers or digit strings, never reais,
+// decimals, empty strings, booleans or values outside JavaScript's safe range.
+function centavos(value: unknown): number | null {
+ if(typeof value!=="number" && !(typeof value==="string" && /^\d+$/.test(value))) return null;
+ const amount=Number(value);
+ return Number.isSafeInteger(amount) && amount>=0 ? amount : null;
+}
+export function paymentMismatch(order: any, data: any): string | null {
  const remote=data?.order, amounts=remote?.amounts;
- if(order.payment_provider!=="appmax" || String(remote?.id)!==String(order.payment_id) || !order.payment_id) return false;
- if(String(data.customer?.id)!==String(order.appmax_customer_id) || data.customer?.email?.toLowerCase()!==order.email.toLowerCase()) return false;
- if(data.payment?.method && data.payment.method!=="pix") return false;
- if(!amounts || ![amounts.sub_total,amounts.shipping_value,amounts.discount,amounts.installment_fee].every(Number.isSafeInteger)) return false;
- if(amounts.sub_total+amounts.shipping_value-amounts.discount+amounts.installment_fee!==order.total) return false;
- if(appmaxStatus(remote.status)==="approved" && (data.payment?.method!=="pix" || remote.total_paid!==order.total)) return false;
- return true;
+ if(order.payment_provider!=="appmax" || String(remote?.id)!==String(order.payment_id) || !order.payment_id) return "identificador do pedido";
+ if(!order.appmax_customer_id || String(data.customer?.id)!==String(order.appmax_customer_id)) return "identificador do cliente";
+ if(typeof data.customer?.email!=="string" || data.customer.email.trim().toLowerCase()!==order.email.trim().toLowerCase()) return "e-mail do cliente";
+ if(data.payment?.method && data.payment.method!=="pix") return "forma de pagamento";
+ const values=[amounts?.sub_total,amounts?.shipping_value,amounts?.discount,amounts?.installment_fee].map(centavos);
+ if(values.some(value=>value===null)) return "formato dos valores";
+ const [subtotal,shipping,discount,fee]=values as number[];
+ if(subtotal+shipping-discount+fee!==order.total) return "valor do pedido";
+ if(appmaxStatus(remote.status)==="approved" && (data.payment?.method!=="pix" || centavos(remote.total_paid)!==order.total)) return "valor pago ou confirmação Pix";
+ return null;
+}
+export function paymentMatches(order: any, data: any) {
+ return paymentMismatch(order,data)===null;
 }
 export function pixInstructions(data: any) {
  const pix=data?.payment || data?.pix;

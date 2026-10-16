@@ -2,7 +2,7 @@ import { db, identity, failure, appmax, pixReady, reconcile, sameOrigin, config 
 import { AppmaxError } from "../../../lib/appmax";
 import { pixInstructions } from "../../../lib/payment";
 import { checkoutSchema } from "../../../lib/checkout";
-import { reservationStatements } from "../../../lib/inventory";
+import { reservationStatements, retryReservationStatements } from "../../../lib/inventory";
 export async function GET(request:Request) {
  
  try {
@@ -10,9 +10,13 @@ export async function GET(request:Request) {
   if(!id) {const orders=await db().prepare("SELECT id,items,total,status,created_at,delivered_at FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(user.userId).all(); return Response.json(orders.results);}
   let o=await db().prepare("SELECT * FROM orders WHERE id=? AND user_id=?").bind(id,user.userId).first<any>();
   if(!o) return Response.json({error:"Pedido não encontrado."},{status:404});
-  if(o.payment_id && o.payment_provider==="appmax") {await reconcile(o); o=await db().prepare("SELECT * FROM orders WHERE id=?").bind(id).first<any>();}
-  const keys=o.status==="approved" && o.delivered_at ? (await db().prepare("SELECT k.code,p.name FROM keys k JOIN products p ON p.id=k.product_id WHERE k.order_id=?").bind(id).all()).results : [];
-  return Response.json({...o,keys,settings:await config()});
+  let reconciliationError:string|null=null;
+  if(o.payment_id && o.payment_provider==="appmax") {
+   try {await reconcile(o);} catch {reconciliationError="Não foi possível confirmar o pagamento. Consulte novamente ou fale com o atendimento informando o número do pedido. Nenhuma nova cobrança foi criada.";}
+   o=await db().prepare("SELECT * FROM orders WHERE id=?").bind(id).first<any>();
+  }
+  const keys=!reconciliationError && o.status==="approved" && o.delivered_at ? (await db().prepare("SELECT k.code,p.name FROM keys k JOIN products p ON p.id=k.product_id WHERE k.order_id=?").bind(id).all()).results : [];
+  return Response.json({...o,keys,reconciliation_error:reconciliationError,settings:await config()},{headers:{"Cache-Control":"private, no-store"}});
  }catch(e){return failure(e);}
 }
 export async function POST(request:Request) {
@@ -37,7 +41,9 @@ export async function POST(request:Request) {
   if(order.payment_id) {await reconcile(order);order=await db().prepare("SELECT * FROM orders WHERE id=?").bind(order.id).first<any>();}
   if(order.qr || order.paid_at || ["cancelled","rejected","refunded","charged_back"].includes(order.status)) return Response.json({id:order.id});
   if(order.payment_state!=="idle") return Response.json({id:order.id});
-  const claim=await db().prepare("UPDATE orders SET payment_state='processing' WHERE id=? AND payment_state='idle'").bind(order.id).run();
+  const attempts=await db().batch(retryReservationStatements(order).map(s=>db().prepare(s.sql).bind(...s.values)));
+  const claim=attempts[attempts.length-1];
+  if(!claim.meta.changes && (await db().prepare("SELECT payment_state FROM orders WHERE id=?").bind(order.id).first<any>())?.payment_state==="idle") throw new Error("Estoque insuficiente para retomar este pedido. Nenhuma nova cobrança foi realizada.");
   if(!claim.meta.changes) return Response.json({id:order.id});
   let stage="customer";
   try {
@@ -61,7 +67,10 @@ export async function POST(request:Request) {
    await db().prepare("UPDATE orders SET status=CASE WHEN status='creating' THEN 'pending' ELSE status END,payment_state='done',qr=?,qr_image=?,pix_expires_at=? WHERE id=?").bind(pix.qr,pix.image,pix.expiresAt,order.id).run();
   }catch(error) {
    const safe=stage==="customer" || (error instanceof AppmaxError && error.definite);
-   await db().prepare("UPDATE orders SET payment_state=? WHERE id=? AND payment_state='processing'").bind(safe?"idle":"unknown",order.id).run();
+   await db().batch([
+    db().prepare("UPDATE orders SET payment_state=? WHERE id=? AND payment_state='processing'").bind(safe?"idle":"unknown",order.id),
+    ...(safe?[db().prepare("UPDATE keys SET order_id=NULL WHERE order_id=? AND EXISTS(SELECT 1 FROM orders WHERE id=? AND payment_state='idle' AND paid_at IS NULL AND qr IS NULL)").bind(order.id,order.id)]:[])
+   ]);
    if(safe) throw error;
    return Response.json({id:order.id});
   }
