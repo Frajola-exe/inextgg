@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { categoryProducts, selectCarouselGames } from '../lib/home.ts';
+import { categoryHighlights, categoryProducts, selectCarouselGames } from '../lib/home.ts';
 import { categoryPath } from '../lib/catalog.ts';
 
 const product = (id, category='Steam', product_type='key', stock=1) => ({
@@ -21,10 +21,17 @@ test('each category contains only its own products and has a dedicated route', (
  assert.deepEqual(categoryProducts(products,'Outros','bot').map(item=>item.id),['bot']);
 });
 
-test('carousel excludes services, bots and games without stock', () => {
+test('carousel includes games without stock but excludes services and bots', () => {
  const games=[product('a'),product('b','Xbox'),product('sold','Steam','key',0),product('service','Outros','service'),product('bot','Outros','bot')];
- assert.equal(selectCarouselGames(games,[],3,()=>0).length,1);
- assert.ok(['a','b'].includes(selectCarouselGames(games,[],3,()=>0)[0].id));
+ const selected=selectCarouselGames(games,[],3,()=>0);
+ assert.equal(selected.length,2);
+ assert.ok(selected.every(item=>item.product_type==='key'));
+ assert.ok(selected.some(item=>item.id==='sold'));
+});
+
+test('home highlights keep games visible when stock runs out', () => {
+ const games=[product('sold','Steam','key',0),product('available'),product('other','Xbox')];
+ assert.deepEqual(categoryHighlights(games,'Steam').map(item=>item.id),['sold','available']);
 });
 
 test('carousel changes its selection on reload when more games are available than slides', () => {

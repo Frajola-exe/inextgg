@@ -1,4 +1,4 @@
-import { available, matchesCategory, type Product } from "./catalog";
+import { matchesCategory, type Product } from "./catalog";
 
 export const categoryProducts = (products:Product[], category:string, subcategory="Todos") => products.filter(product =>
  category==="Serviços"?product.product_type==="service":
@@ -6,8 +6,10 @@ export const categoryProducts = (products:Product[], category:string, subcategor
  matchesCategory(product,category,subcategory)
 );
 
+export const categoryHighlights = (products:Product[], category:string) => categoryProducts(products,category).slice(0,4);
+
 export function selectCarouselGames(products:Product[], previousIds:string[]=[], count=3, random=Math.random):Product[] {
- const games=products.filter(product=>product.product_type==="key" && available(product));
+ const games=products.filter(product=>product.product_type==="key");
  const slideCount=games.length>1?Math.min(count,games.length-1):Math.min(count,games.length);
  const shuffled=[...games];
  for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(random()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];}
