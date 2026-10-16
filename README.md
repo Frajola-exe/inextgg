@@ -28,6 +28,8 @@ O checkout reserva as keys em um lote transacional e mantém o mesmo pedido em r
 
 A consulta do comprador preserva o pedido e o Pix quando a conferência com a Appmax falha, exibindo aviso e número do pedido. A entrega continua bloqueada enquanto a conferência falhar. A validação aceita centavos inteiros como números ou strings de dígitos; não converte valores em reais nem aceita decimais. Divergências no painel indicam qual campo não corresponde ao pedido.
 
+Cancelamentos e rejeições são tratados antes da validação completa exigida para entrega: a consulta autenticada deve confirmar o ID Appmax salvo e o status terminal. Se houver um ID de cliente retornado, ele também deve corresponder. Campos ausentes ou alterados de e-mail e composição do valor não impedem a devolução ao estoque. Evidências de pagamento na API, valores pagos inválidos ou positivos, pagamento local ou entrega registrada bloqueiam essa devolução. Ao confirmar o cancelamento sem pagamento, o servidor libera a reserva e apaga as instruções Pix em uma transação; webhooks e consultas do cliente/administrador usam o mesmo fluxo. Falhas na conferência ocultam o QR Code na tela do comprador até nova consulta.
+
 Pedidos anteriores são identificados como `legacy` pela migração e não são consultados na Appmax. Não há chamadas ao gateway anterior nem fallback. Estes pedidos precisam de conferência externa pelo responsável da loja.
 
 Entrega automática exige a opção global e a opção do produto. Entrega manual só libera keys de pedidos aprovados. Reembolso, contestação ou análise de estorno bloqueiam a consulta às keys. Uma key já copiada não pode ser revogada pelo site. Esta versão não inclui estorno automático, email ou job periódico de reconciliação.
