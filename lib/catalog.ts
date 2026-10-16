@@ -1,6 +1,9 @@
 export type Product = { id:string; name:string; category:string; description:string; image:string; price:number; old_price:number; active:number; automatic:number; stock:number; product_type:"key"|"service"|"bot"; price_mode:"fixed"|"negotiable" };
 export const categories = ["Steam", "PlayStation", "Xbox", "Outros"];
-export const productTypes = {key:"Key de jogo",service:"Serviço",bot:"Bot para Discord"} as const;
+export const productTypes = {key:"Key de jogo",service:"Serviços digitais",bot:"Bots Discord"} as const;
+export const otherSubcategories = {service:"Serviços digitais",bot:"Bots Discord"} as const;
+export const matchesCategory = (product:Product, category:string, subcategory="Todos") =>
+ category==="Todos" || (product.category===category && (category!=="Outros" || subcategory==="Todos" || product.product_type===subcategory));
 export const available = (product:Product) => product.product_type!=="key" || product.stock>0;
 export const fixedPrice = (product:Product) => product.price_mode==="fixed";
 export const platformPath = (category:string) => `/plataforma/${category.toLowerCase()}`;

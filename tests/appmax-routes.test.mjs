@@ -42,6 +42,7 @@ test('admin creates services and bots without key stock, supports fixed checkout
   const s=setup();
   const id=productType;
   const product={id,name:productType==='bot'?'Discord bot':'Discord setup',product_type:productType,price_mode:'fixed',category:'Outros',description:'Custom work',image:'',price:1000,old_price:0,active:1,automatic:1};
+  assert.equal((await adminAction({action:'product',product:{...product,category:'Steam'}})).status,400);
   assert.equal((await adminAction({action:'product',product})).status,200);
   assert.equal(s.db.prepare('SELECT automatic FROM products WHERE id=?').get(id).automatic,0);
   assert.equal((await adminAction({action:'keys',id,codes:['SHOULD-NOT-IMPORT']})).status,400);

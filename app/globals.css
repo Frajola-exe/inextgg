@@ -29,3 +29,4 @@
 @media(prefers-reduced-motion:reduce){.floating-support{transition:none}.floating-support:hover,.floating-support:active{transform:none}}
 .quote-button{border:1px solid var(--border);border-radius:6px;padding:8px 10px;text-align:center;justify-content:center;white-space:nowrap}
 @media(max-width:700px){.price-row:has(.quote-button){flex-wrap:wrap}.price-row .quote-button{width:100%}}
+.other-subcategories{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:18px 0 24px;color:var(--muted);font-size:12px}.other-subcategories>span{font-weight:700;color:var(--text)}.other-subcategories .filter-pills{flex-wrap:wrap}
