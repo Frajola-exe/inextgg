@@ -3,6 +3,7 @@ import { z } from "zod";
 const image=z.union([z.literal(""),z.string().url().refine(v=>v.startsWith("https://"))]);
 const variant=z.object({id:z.string().uuid().optional(),name:z.string().trim().min(1).max(80),price:z.number().int().min(1).max(10000000),quantity:z.number().int().min(1).max(100000)});
 const product=z.object({id:z.string().optional(),name:z.string().min(2).max(120),product_type:z.enum(["key","service","bot"]).default("key"),price_mode:z.enum(["fixed","negotiable"]).default("fixed"),category:z.enum(["Steam","PlayStation","Xbox","Outros"]),description:z.string().max(3000),image,price:z.number().int().min(0).max(10000000),old_price:z.number().int().min(0),active:z.number().int().min(0).max(1),automatic:z.number().int().min(0).max(1),variants:z.array(variant).max(30).default([])}).superRefine((p,ctx)=>{
+ if(p.product_type!=="key" && p.category!=="Outros") ctx.addIssue({code:"custom",message:"Serviços digitais e bots Discord pertencem à categoria Outros.",path:["category"]});
  if(p.product_type==="key" && p.price_mode!=="fixed") ctx.addIssue({code:"custom",message:"Keys precisam de preço fixo.",path:["price_mode"]});
  if(p.price_mode==="fixed" && p.price<1 && !p.variants.length) ctx.addIssue({code:"custom",message:"Informe um preço fixo válido.",path:["price"]});
  if(p.price_mode==="negotiable" && (p.price!==0 || p.old_price!==0)) ctx.addIssue({code:"custom",message:"Preço negociável não pode ter valor definido.",path:["price"]});
