@@ -9,14 +9,16 @@ const product = (id, category='Steam', product_type='key', stock=1) => ({
 
 test('each category contains only its own products and has a dedicated route', () => {
  const products=[product('steam'),product('ps','PlayStation'),product('xbox','Xbox'),product('other','Outros'),product('service','Outros','service'),product('bot','Outros','bot')];
- for(const [category,id,path] of [
-  ['Steam','steam','/plataforma/steam'],['PlayStation','ps','/plataforma/playstation'],
-  ['Xbox','xbox','/plataforma/xbox'],['Outros','other','/plataforma/outros'],
-  ['Serviços','service','/categoria/servicos'],['Bots','bot','/categoria/bots'],
+ for(const [category,ids,path] of [
+  ['Steam',['steam'],'/plataforma/steam'],['PlayStation',['ps'],'/plataforma/playstation'],
+  ['Xbox',['xbox'],'/plataforma/xbox'],['Outros',['other','service','bot'],'/plataforma/outros'],
+  ['Serviços',['service'],'/categoria/servicos'],['Bots',['bot'],'/categoria/bots'],
  ]) {
-  assert.deepEqual(categoryProducts(products,category).map(item=>item.id),[id]);
+  assert.deepEqual(categoryProducts(products,category).map(item=>item.id),ids);
   assert.equal(categoryPath(category),path);
  }
+ assert.deepEqual(categoryProducts(products,'Outros','service').map(item=>item.id),['service']);
+ assert.deepEqual(categoryProducts(products,'Outros','bot').map(item=>item.id),['bot']);
 });
 
 test('carousel excludes services, bots and games without stock', () => {

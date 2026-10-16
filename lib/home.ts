@@ -1,9 +1,9 @@
-import { available, type Product } from "./catalog";
+import { available, matchesCategory, type Product } from "./catalog";
 
-export const categoryProducts = (products:Product[], category:string) => products.filter(product =>
+export const categoryProducts = (products:Product[], category:string, subcategory="Todos") => products.filter(product =>
  category==="Serviços"?product.product_type==="service":
  category==="Bots"?product.product_type==="bot":
- product.product_type==="key" && product.category===category
+ matchesCategory(product,category,subcategory)
 );
 
 export function selectCarouselGames(products:Product[], previousIds:string[]=[], count=3, random=Math.random):Product[] {
