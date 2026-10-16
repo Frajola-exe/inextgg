@@ -7,5 +7,7 @@ export const matchesCategory = (product:Product, category:string, subcategory="T
 export const available = (product:Product) => product.product_type!=="key" || product.stock>0;
 export const fixedPrice = (product:Product) => product.price_mode==="fixed";
 export const platformPath = (category:string) => `/plataforma/${category.toLowerCase()}`;
+export const categoryPath = (category:string) => category==="Serviços"?"/categoria/servicos":category==="Bots"?"/categoria/bots":platformPath(category);
+export const storeCategories = [...categories,"Serviços","Bots"];
 export const productPath = (id:string) => `/jogo/${encodeURIComponent(id)}`;
 export const money = (n:number) => new Intl.NumberFormat("pt-BR", {style:"currency",currency:"BRL"}).format(n/100);
