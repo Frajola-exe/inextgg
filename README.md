@@ -74,6 +74,13 @@ A quantidade define o máximo de keys que podem ser importadas; a vitrine mostra
 apenas as keys realmente disponíveis. Produtos de key já cadastrados sem versões
 continuam com o estoque antigo.
 
+Para separar os tipos de key, aplique `db/key-types-migration.sql` em
+PostgreSQL/Supabase ou `drizzle/0004_key_types.sql` em D1 antes do deploy. A
+migração classifica os produtos existentes pela plataforma: Steam como STEAM KEY,
+Xbox como XBOX KEY e PlayStation como PSN KEY. No painel, selecione o tipo de key
+ao cadastrar o produto; o estoque e a entrega continuam vinculados a esse produto.
+Um produto com keys importadas não pode mudar de tipo.
+
 As reservas usam transações e uma trava compartilhada entre instâncias do servidor.
 Essa trava serializa as gravações e pode limitar o volume de pedidos simultâneos.
 

@@ -15,7 +15,7 @@ export async function GET(request:Request) {
    try {await reconcile(o);} catch(error) {reconciliationError=error instanceof PaymentMismatchError?error.message:"Não foi possível confirmar o pagamento. Consulte novamente ou fale com o atendimento informando o número do pedido. Nenhuma nova cobrança foi criada.";}
    o=await db().prepare("SELECT * FROM orders WHERE id=?").bind(id).first<any>();
   }
-  const keys=!reconciliationError && o.status==="approved" && o.delivered_at ? (await db().prepare("SELECT k.code,p.name,v.name variant_name FROM keys k JOIN products p ON p.id=k.product_id LEFT JOIN product_variants v ON v.id=k.variant_id WHERE k.order_id=?").bind(id).all()).results : [];
+  const keys=!reconciliationError && o.status==="approved" && o.delivered_at ? (await db().prepare("SELECT k.code,p.name,p.key_type,v.name variant_name FROM keys k JOIN products p ON p.id=k.product_id LEFT JOIN product_variants v ON v.id=k.variant_id WHERE k.order_id=?").bind(id).all()).results : [];
   return Response.json({...o,keys,reconciliation_error:reconciliationError,settings:await config()},{headers:{"Cache-Control":"private, no-store"}});
  }catch(e){return failure(e);}
 }

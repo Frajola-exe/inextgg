@@ -24,6 +24,17 @@ test('existing PostgreSQL products migrate to key and fixed defaults', async () 
   } finally { await engine.close(); }
 });
 
+test('existing PostgreSQL key products gain platform-specific key types', async () => {
+  const engine=new PGlite();
+  try {
+    await engine.exec("CREATE TABLE products (id text PRIMARY KEY, category text NOT NULL, product_type text NOT NULL); INSERT INTO products VALUES ('s','Steam','key'),('x','Xbox','key'),('p','PlayStation','key'),('svc','Outros','service')");
+    await engine.exec(await readFile(new URL('../db/key-types-migration.sql',import.meta.url),'utf8'));
+    const {rows}=await engine.query('SELECT id,key_type FROM products ORDER BY id');
+    assert.deepEqual(rows,[{id:'p',key_type:'psn'},{id:'s',key_type:'steam'},{id:'svc',key_type:null},{id:'x',key_type:'xbox'}]);
+    await assert.rejects(engine.exec("UPDATE products SET key_type='invalid' WHERE id='s'"));
+  } finally {await engine.close();}
+});
+
 test('Supabase CA survives pg URI parsing with TLS verification enabled', () => {
   const ca = rootCertificates[0];
   const options = postgresPoolOptions({

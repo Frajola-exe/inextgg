@@ -37,6 +37,27 @@ function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
  return {db,body,post,state,calls};
 }
 function adminAction(body){return admin.POST(new Request('https://store.test/api/admin',{method:'POST',headers:{origin:'https://store.test','content-type':'application/json'},body:JSON.stringify(body)}));}
+test('key types stay aligned with platform, stock and delivery',async()=>{
+ for(const [type,category] of [['steam','Steam'],['xbox','Xbox'],['psn','PlayStation']]){
+  const s=setup();
+  const product={id:`game-${type}`,name:`Game ${type}`,product_type:'key',key_type:type,price_mode:'fixed',category,description:'Game',image:'',price:1000,old_price:0,active:1,automatic:1,variants:[]};
+  assert.equal((await adminAction({action:'product',product:{...product,category:'Outros'}})).status,400);
+  assert.equal((await adminAction({action:'product',product})).status,200);
+  assert.equal(s.db.prepare('SELECT key_type FROM products WHERE id=?').get(product.id).key_type,type);
+  assert.equal((await adminAction({action:'keys',id:product.id,codes:[`KEY-${type}`]})).status,200);
+  s.body.items=[{id:product.id,quantity:1}];
+  const response=await s.post();assert.equal(response.status,200);
+  const id=(await response.json()).id;
+  assert.equal(s.db.prepare('SELECT order_id FROM keys WHERE product_id=?').get(product.id).order_id,id);
+  assert.equal(s.db.prepare("SELECT order_id FROM keys WHERE id='k'").get().order_id,null);
+  s.state.status='aprovado';
+  const delivered=await (await routes.GET(new Request(`https://store.test/api/orders?id=${id}`))).json();
+  assert.equal(delivered.keys[0].key_type,type);
+  assert.equal(delivered.keys[0].code,`KEY-${type}`);
+  assert.equal((await adminAction({action:'product',product:{...product,key_type:type==='steam'?'xbox':'steam',category:type==='steam'?'Xbox':'Steam'}})).status,400);
+  s.db.close();
+ }
+});
 test('admin versions require complete fields and checkout reserves the selected edition at its own price',async()=>{
  const s=setup();
  const product={id:'versions',name:'Edition Game',product_type:'key',price_mode:'fixed',category:'Steam',description:'Game editions',image:'',price:0,old_price:0,active:1,automatic:1,variants:[{name:'Standard',price:1200,quantity:1},{name:'Deluxe',price:2400,quantity:2}]};

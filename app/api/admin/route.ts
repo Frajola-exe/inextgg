@@ -1,8 +1,10 @@
 import { db, identity, failure, sameOrigin, config, reconcile, reconcileInventory, fulfill, pixReady } from "../../../lib/server";
 import { z } from "zod";
+import { keyTypes, keyTypeForCategory } from "../../../lib/catalog";
 const image=z.union([z.literal(""),z.string().url().refine(v=>v.startsWith("https://"))]);
 const variant=z.object({id:z.string().uuid().optional(),name:z.string().trim().min(1).max(80),price:z.number().int().min(1).max(10000000),quantity:z.number().int().min(1).max(100000)});
-const product=z.object({id:z.string().optional(),name:z.string().min(2).max(120),product_type:z.enum(["key","service","bot"]).default("key"),price_mode:z.enum(["fixed","negotiable"]).default("fixed"),category:z.enum(["Steam","PlayStation","Xbox","Outros"]),description:z.string().max(3000),image,price:z.number().int().min(0).max(10000000),old_price:z.number().int().min(0),active:z.number().int().min(0).max(1),automatic:z.number().int().min(0).max(1),variants:z.array(variant).max(30).default([])}).superRefine((p,ctx)=>{
+const product=z.object({id:z.string().optional(),name:z.string().min(2).max(120),product_type:z.enum(["key","service","bot"]).default("key"),key_type:z.enum(["steam","xbox","psn"]).nullish(),price_mode:z.enum(["fixed","negotiable"]).default("fixed"),category:z.enum(["Steam","PlayStation","Xbox","Outros"]),description:z.string().max(3000),image,price:z.number().int().min(0).max(10000000),old_price:z.number().int().min(0),active:z.number().int().min(0).max(1),automatic:z.number().int().min(0).max(1),variants:z.array(variant).max(30).default([])}).superRefine((p,ctx)=>{
+ if(p.product_type==="key" && (!keyTypeForCategory(p.category) || p.key_type && keyTypes[p.key_type].category!==p.category)) ctx.addIssue({code:"custom",message:"O tipo de key deve corresponder à plataforma do produto.",path:["key_type"]});
  if(p.product_type!=="key" && p.category!=="Outros") ctx.addIssue({code:"custom",message:"Serviços digitais e bots Discord pertencem à categoria Outros.",path:["category"]});
  if(p.product_type==="key" && p.price_mode!=="fixed") ctx.addIssue({code:"custom",message:"Keys precisam de preço fixo.",path:["price_mode"]});
  if(p.price_mode==="fixed" && p.price<1 && !p.variants.length) ctx.addIssue({code:"custom",message:"Informe um preço fixo válido.",path:["price"]});
@@ -25,10 +27,14 @@ export async function POST(request:Request) {
  try {
   sameOrigin(request); await identity(true); const body:any=await request.json();
   if(body.action==="product") {
-   const p=product.parse(body.product),id=p.id || crypto.randomUUID();
+   const p=product.parse(body.product),id=p.id || crypto.randomUUID(),keyType=p.product_type==="key"?(p.key_type||keyTypeForCategory(p.category)):null;
    if(p.id && p.product_type!=="key") {
     const inventory=await db().prepare("SELECT COUNT(*) n FROM keys WHERE product_id=?").bind(p.id).first<{n:number}>();
     if(inventory?.n) throw new Error("Remova as keys existentes antes de alterar o tipo do produto.");
+   }
+   if(p.id && keyType) {
+    const current=await db().prepare("SELECT key_type FROM products WHERE id=?").bind(p.id).first<{key_type:string|null}>();
+    if(current?.key_type && current.key_type!==keyType && (await db().prepare("SELECT COUNT(*) n FROM keys WHERE product_id=?").bind(p.id).first<{n:number}>())?.n) throw new Error("Não é possível alterar o tipo de um produto com keys cadastradas.");
    }
    const existing=p.id?(await db().prepare("SELECT id,quantity FROM product_variants WHERE product_id=? AND active=1").bind(id).all()).results as {id:string;quantity:number}[]:[];
    const submitted=new Set(p.variants.map(v=>v.id).filter(Boolean));
@@ -41,7 +47,7 @@ export async function POST(request:Request) {
    if(legacy && legacy+firstImported>p.variants[0].quantity) throw new Error("A primeira versão precisa comportar as keys disponíveis deste produto.");
    const firstVariantId=p.variants[0]?.id||crypto.randomUUID();
    await db().batch([
-    db().prepare("INSERT INTO products(id,name,category,description,image,price,old_price,active,automatic,product_type,price_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,description=excluded.description,image=excluded.image,price=excluded.price,old_price=excluded.old_price,active=excluded.active,automatic=excluded.automatic,product_type=excluded.product_type,price_mode=excluded.price_mode").bind(id,p.name,p.category,p.description,p.image,p.variants.length?Math.min(...p.variants.map(v=>v.price)):p.price,p.variants.length?0:p.old_price,p.active,p.product_type==="key"?p.automatic:0,p.product_type,p.price_mode),
+    db().prepare("INSERT INTO products(id,name,category,description,image,price,old_price,active,automatic,product_type,price_mode,key_type) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,description=excluded.description,image=excluded.image,price=excluded.price,old_price=excluded.old_price,active=excluded.active,automatic=excluded.automatic,product_type=excluded.product_type,price_mode=excluded.price_mode,key_type=excluded.key_type").bind(id,p.name,p.category,p.description,p.image,p.variants.length?Math.min(...p.variants.map(v=>v.price)):p.price,p.variants.length?0:p.old_price,p.active,p.product_type==="key"?p.automatic:0,p.product_type,p.price_mode,keyType),
     ...removed.map(v=>db().prepare("UPDATE product_variants SET active=0 WHERE id=?").bind(v.id)),
     ...p.variants.map((v,index)=>db().prepare("INSERT INTO product_variants(id,product_id,name,price,quantity) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,price=excluded.price,quantity=excluded.quantity").bind(index===0?firstVariantId:v.id||crypto.randomUUID(),id,v.name,v.price,v.quantity)),
     ...(legacy?[db().prepare("UPDATE keys SET variant_id=? WHERE product_id=? AND variant_id IS NULL AND (order_id IS NULL OR EXISTS (SELECT 1 FROM orders o WHERE o.id=keys.order_id AND o.delivered_at IS NULL))").bind(firstVariantId,id)]:[])
