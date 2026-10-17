@@ -74,6 +74,14 @@ A quantidade define o máximo de keys que podem ser importadas; a vitrine mostra
 apenas as keys realmente disponíveis. Produtos de key já cadastrados sem versões
 continuam com o estoque antigo.
 
+Bots e serviços em **Outros** também aceitam várias opções no mesmo produto.
+No painel, informe o nome e o preço de cada opção; se o preço for negociável,
+cada opção é identificada no pedido de orçamento. Essas opções não usam estoque
+de keys. Em PostgreSQL/Supabase já existente, aplique
+`db/product-options-migration.sql` antes de publicar esta versão. O banco novo
+já inclui a regra atualizada; em D1, a tabela de versões existente já comporta
+essas opções. A migração foi aplicada ao projeto Supabase iNextgg.
+
 Para separar os tipos de key, aplique `db/key-types-migration.sql` em
 PostgreSQL/Supabase ou `drizzle/0004_key_types.sql` em D1 antes do deploy. A
 migração classifica os produtos existentes pela plataforma: Steam como STEAM KEY,
