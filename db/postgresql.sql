@@ -43,7 +43,7 @@ CREATE TABLE product_variants (
   id text PRIMARY KEY,
   product_id text NOT NULL REFERENCES products (id),
   name text NOT NULL,
-  price integer NOT NULL CHECK (price > 0),
+  price integer NOT NULL CHECK (price >= 0),
   quantity integer NOT NULL CHECK (quantity >= 0),
   active integer NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
 );

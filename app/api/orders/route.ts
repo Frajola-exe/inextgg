@@ -33,7 +33,7 @@ export async function POST(request:Request) {
    if(products.some((p,i)=>p.price_mode!=="fixed" || p.price<1 || (p.product_type!=="key" && body.items[i].quantity!==1))) throw new Error("Produto indisponível para compra direta.");
    const variants=await Promise.all(body.items.map((i,index)=>db().prepare("SELECT id,name,price FROM product_variants WHERE product_id=? AND active=1 AND id=?").bind(i.id,i.variantId||"").first<any>()));
    const counts=await Promise.all(body.items.map(i=>db().prepare("SELECT COUNT(*) n FROM product_variants WHERE product_id=? AND active=1").bind(i.id).first<{n:number}>()));
-   if(body.items.some((i,index)=>Boolean(counts[index]?.n)!==Boolean(i.variantId) || i.variantId && !variants[index])) throw new Error("Selecione uma versão válida do jogo.");
+   if(body.items.some((i,index)=>Boolean(counts[index]?.n)!==Boolean(i.variantId) || i.variantId && !variants[index])) throw new Error("Selecione uma opção válida do produto.");
    const items=products.map((p,i)=>({id:p.id,name:variants[i]?`${p.name} — ${variants[i].name}`:p.name,price:variants[i]?.price??p.price,quantity:body.items[i].quantity,automatic:p.automatic,product_type:p.product_type,variantId:variants[i]?.id}));
    const total=items.reduce((sum,i)=>sum+i.price*i.quantity,0),id=crypto.randomUUID();
    try {await db().batch(reservationStatements({id,userId:user.userId,email:user.email,requestKey,createdAt:Date.now(),items}).map(s=>db().prepare(s.sql).bind(...s.values)));}

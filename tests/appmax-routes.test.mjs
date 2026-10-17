@@ -94,6 +94,29 @@ test('existing key stock moves to the first version when editions are added',asy
  assert.equal(s.db.prepare('SELECT total FROM orders').get().total,1500);
  s.db.close();
 });
+test('bots and services can have multiple independently priced options',async()=>{
+ for(const productType of ['bot','service']){
+  const s=setup();
+  const product={id:productType,name:`Oferta ${productType}`,product_type:productType,price_mode:'fixed',category:'Outros',description:'Opções',image:'',price:0,old_price:0,active:1,automatic:0,variants:[{name:'Básico',price:1200,quantity:0},{name:'Premium',price:2400,quantity:0}]};
+  assert.equal((await adminAction({action:'product',product:{...product,variants:[{name:'Inválida',price:1200,quantity:1}]}})).status,400);
+  assert.equal((await adminAction({action:'product',product})).status,200);
+  const options=s.db.prepare('SELECT * FROM product_variants WHERE product_id=? ORDER BY price').all(productType);
+  assert.equal(options.length,2);
+  assert.equal(options[0].quantity,0);
+  const catalog=await (await store.GET()).json();
+  assert.equal(catalog.products.find(p=>p.id===productType).variants.length,2);
+  s.body.items=[{id:productType,quantity:1}];
+  assert.equal((await s.post()).status,400);
+  s.body.items=[{id:productType,variantId:options[1].id,quantity:1}];
+  const response=await s.post();assert.equal(response.status,200);
+  const order=s.db.prepare('SELECT * FROM orders WHERE id=?').get((await response.json()).id);
+  assert.equal(order.total,2400);
+  assert.equal(JSON.parse(order.items)[0].name,`${product.name} — Premium`);
+  assert.equal((await adminAction({action:'product',product:{...product,price_mode:'negotiable',variants:options.map(v=>({id:v.id,name:v.name,price:0,quantity:0}))}})).status,200);
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM product_variants WHERE product_id=? AND active=1').get(productType).n,2);
+  s.db.close();
+ }
+});
 test('admin creates services and bots without key stock, supports fixed checkout and negotiable contact',async()=>{
  for(const productType of ['service','bot']) {
   const s=setup();
