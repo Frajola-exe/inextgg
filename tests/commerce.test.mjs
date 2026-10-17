@@ -14,7 +14,7 @@ test('duplicate inventory keys rollback complete import',()=>{const d=database()
 
 test('services and bots reserve without keys and coexist with key products',()=>{
  const d=database();
- d.exec("INSERT INTO products(id,name,category,description,image,price,product_type) VALUES('s','Setup','Outros','','',1000,'service'),('b','Bot','Outros','','',2000,'bot')");
+ d.exec("INSERT INTO products(id,name,category,description,image,price,product_type) VALUES('s','Setup','Serviços','','',1000,'service'),('b','Bot','Serviços','','',2000,'bot')");
  const service={id:'s',name:'Setup',quantity:1,price:1000,automatic:0,product_type:'service'};
  const bot={id:'b',name:'Bot',quantity:1,price:2000,automatic:0,product_type:'bot'};
  reserve(d,'one',[p,service,bot]);

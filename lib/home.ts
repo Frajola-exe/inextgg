@@ -1,12 +1,10 @@
 import { matchesCategory, type Product } from "./catalog";
 
-export const categoryProducts = (products:Product[], category:string, subcategory="Todos") => products.filter(product =>
- category==="Em breve"?!!product.coming_soon:
- product.coming_soon?false:
- category==="Serviços"?product.product_type==="service":
- category==="Bots"?product.product_type==="bot":
- matchesCategory(product,category,subcategory)
-);
+export const categoryProducts = (products:Product[], category:string, subcategory="Todos") =>
+ products.filter(product => matchesCategory(product,category,subcategory));
+
+export const populatedCategories = (products:Product[], categories:string[]) =>
+ categories.filter(category => categoryProducts(products,category).length>0);
 
 export const categoryHighlights = (products:Product[], category:string) => categoryProducts(products,category).slice(0,4);
 

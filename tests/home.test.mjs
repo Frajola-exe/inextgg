@@ -1,29 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { categoryHighlights, categoryProducts, selectCarouselGames } from '../lib/home.ts';
-import { categoryPath } from '../lib/catalog.ts';
+import { categoryHighlights, categoryProducts, populatedCategories, selectCarouselGames } from '../lib/home.ts';
+import { categoryPath, storeCategories } from '../lib/catalog.ts';
 
 const product = (id, category='Steam', product_type='key', stock=1) => ({
  id, name:id, category, product_type, stock, price_mode:'fixed', price:1000,
 });
 
 test('each category contains only its own products and has a dedicated route', () => {
- const products=[product('steam'),product('ps','PlayStation'),product('xbox','Xbox'),product('other','Outros'),product('service','Outros','service'),product('bot','Outros','bot'),{...product('soon'),coming_soon:1}];
+ const products=[product('steam'),product('ps','PlayStation'),product('xbox','Xbox'),product('service','Serviços','service'),product('bot','Serviços','bot'),{...product('soon'),coming_soon:1}];
  for(const [category,ids,path] of [
   ['Steam',['steam'],'/plataforma/steam'],['PlayStation',['ps'],'/plataforma/playstation'],
-  ['Xbox',['xbox'],'/plataforma/xbox'],['Outros',['other','service','bot'],'/plataforma/outros'],
-  ['Serviços',['service'],'/categoria/servicos'],['Bots',['bot'],'/categoria/bots'],
+  ['Xbox',['xbox'],'/plataforma/xbox'],['Serviços',['service','bot'],'/categoria/servicos'],
   ['Em breve',['soon'],'/categoria/em-breve'],
  ]) {
   assert.deepEqual(categoryProducts(products,category).map(item=>item.id),ids);
   assert.equal(categoryPath(category),path);
  }
- assert.deepEqual(categoryProducts(products,'Outros','service').map(item=>item.id),['service']);
- assert.deepEqual(categoryProducts(products,'Outros','bot').map(item=>item.id),['bot']);
+ assert.deepEqual(categoryProducts(products,'Serviços','service').map(item=>item.id),['service']);
+ assert.deepEqual(categoryProducts(products,'Serviços','bot').map(item=>item.id),['bot']);
+});
+
+test('home lists only populated categories, including upcoming products and games without stock', () => {
+ const products=[product('sold','Steam','key',0),product('bot','Serviços','bot'),{...product('soon'),coming_soon:1}];
+ assert.deepEqual(populatedCategories(products,storeCategories),['Steam','Serviços','Em breve']);
+ assert.deepEqual(populatedCategories([],storeCategories),[]);
 });
 
 test('carousel includes games without stock but excludes services and bots', () => {
- const games=[product('a'),product('b','Xbox'),product('sold','Steam','key',0),product('service','Outros','service'),product('bot','Outros','bot')];
+ const games=[product('a'),product('b','Xbox'),product('sold','Steam','key',0),product('service','Serviços','service'),product('bot','Serviços','bot')];
  const selected=selectCarouselGames(games,[],3,()=>0);
  assert.equal(selected.length,2);
  assert.ok(selected.every(item=>item.product_type==='key'));

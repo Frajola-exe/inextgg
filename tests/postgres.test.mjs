@@ -46,6 +46,17 @@ test('existing PostgreSQL products default to available after coming-soon migrat
   } finally {await engine.close();}
 });
 
+test('existing services and bots move to Serviços and keep their types', async () => {
+  const engine=new PGlite();
+  try {
+    await engine.exec("CREATE TABLE products (id text PRIMARY KEY, category text NOT NULL, product_type text NOT NULL); INSERT INTO products VALUES ('game','Steam','key'),('service','Outros','service'),('bot','Outros','bot')");
+    await engine.exec(await readFile(new URL('../db/services-category-migration.sql',import.meta.url),'utf8'));
+    const {rows}=await engine.query('SELECT id,category,product_type FROM products ORDER BY id');
+    assert.deepEqual(rows,[{id:'bot',category:'Serviços',product_type:'bot'},{id:'game',category:'Steam',product_type:'key'},{id:'service',category:'Serviços',product_type:'service'}]);
+    await assert.rejects(engine.exec("UPDATE products SET category='Outros' WHERE id='bot'"));
+  } finally {await engine.close();}
+});
+
 test('Supabase CA survives pg URI parsing with TLS verification enabled', () => {
   const ca = rootCertificates[0];
   const options = postgresPoolOptions({

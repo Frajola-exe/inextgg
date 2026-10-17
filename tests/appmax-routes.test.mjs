@@ -116,7 +116,7 @@ test('existing key stock moves to the first version when editions are added',asy
 test('bots and services can have multiple independently priced options',async()=>{
  for(const productType of ['bot','service']){
   const s=setup();
-  const product={id:productType,name:`Oferta ${productType}`,product_type:productType,price_mode:'fixed',category:'Outros',description:'Opções',image:'',price:0,old_price:0,active:1,automatic:0,variants:[{name:'Básico',price:1200,quantity:0},{name:'Premium',price:2400,quantity:0}]};
+  const product={id:productType,name:`Oferta ${productType}`,product_type:productType,price_mode:'fixed',category:'Serviços',description:'Opções',image:'',price:0,old_price:0,active:1,automatic:0,variants:[{name:'Básico',price:1200,quantity:0},{name:'Premium',price:2400,quantity:0}]};
   assert.equal((await adminAction({action:'product',product:{...product,variants:[{name:'Inválida',price:1200,quantity:1}]}})).status,400);
   assert.equal((await adminAction({action:'product',product})).status,200);
   const options=s.db.prepare('SELECT * FROM product_variants WHERE product_id=? ORDER BY price').all(productType);
@@ -140,7 +140,7 @@ test('admin creates services and bots without key stock, supports fixed checkout
  for(const productType of ['service','bot']) {
   const s=setup();
   const id=productType;
-  const product={id,name:productType==='bot'?'Discord bot':'Discord setup',product_type:productType,price_mode:'fixed',category:'Outros',description:'Custom work',image:'',price:1000,old_price:0,active:1,automatic:1};
+  const product={id,name:productType==='bot'?'Discord bot':'Discord setup',product_type:productType,price_mode:'fixed',category:'Serviços',description:'Custom work',image:'',price:1000,old_price:0,active:1,automatic:1};
   assert.equal((await adminAction({action:'product',product:{...product,category:'Steam'}})).status,400);
   assert.equal((await adminAction({action:'product',product})).status,200);
   assert.equal(s.db.prepare('SELECT automatic FROM products WHERE id=?').get(id).automatic,0);
