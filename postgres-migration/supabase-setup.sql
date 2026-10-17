@@ -17,7 +17,8 @@ CREATE TABLE products (
   old_price integer NOT NULL DEFAULT 0,
   active integer NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
   automatic integer NOT NULL DEFAULT 1 CHECK (automatic IN (0, 1)),
-  deleted integer NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1))
+  deleted integer NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+  coming_soon integer NOT NULL DEFAULT 0 CHECK (coming_soon IN (0, 1))
 );
 
 CREATE TABLE orders (

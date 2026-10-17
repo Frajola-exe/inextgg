@@ -35,6 +35,17 @@ test('existing PostgreSQL key products gain platform-specific key types', async 
   } finally {await engine.close();}
 });
 
+test('existing PostgreSQL products default to available after coming-soon migration', async () => {
+  const engine=new PGlite();
+  try {
+    await engine.exec("CREATE TABLE products (id text PRIMARY KEY); INSERT INTO products VALUES ('old')");
+    await engine.exec(await readFile(new URL('../db/coming-soon-migration.sql',import.meta.url),'utf8'));
+    assert.equal((await engine.query("SELECT coming_soon FROM products WHERE id='old'")).rows[0].coming_soon,0);
+    await engine.exec("UPDATE products SET coming_soon=1 WHERE id='old'");
+    await assert.rejects(engine.exec("UPDATE products SET coming_soon=2 WHERE id='old'"));
+  } finally {await engine.close();}
+});
+
 test('Supabase CA survives pg URI parsing with TLS verification enabled', () => {
   const ca = rootCertificates[0];
   const options = postgresPoolOptions({

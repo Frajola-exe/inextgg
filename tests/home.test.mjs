@@ -8,11 +8,12 @@ const product = (id, category='Steam', product_type='key', stock=1) => ({
 });
 
 test('each category contains only its own products and has a dedicated route', () => {
- const products=[product('steam'),product('ps','PlayStation'),product('xbox','Xbox'),product('other','Outros'),product('service','Outros','service'),product('bot','Outros','bot')];
+ const products=[product('steam'),product('ps','PlayStation'),product('xbox','Xbox'),product('other','Outros'),product('service','Outros','service'),product('bot','Outros','bot'),{...product('soon'),coming_soon:1}];
  for(const [category,ids,path] of [
   ['Steam',['steam'],'/plataforma/steam'],['PlayStation',['ps'],'/plataforma/playstation'],
   ['Xbox',['xbox'],'/plataforma/xbox'],['Outros',['other','service','bot'],'/plataforma/outros'],
   ['Serviços',['service'],'/categoria/servicos'],['Bots',['bot'],'/categoria/bots'],
+  ['Em breve',['soon'],'/categoria/em-breve'],
  ]) {
   assert.deepEqual(categoryProducts(products,category).map(item=>item.id),ids);
   assert.equal(categoryPath(category),path);
@@ -32,6 +33,13 @@ test('carousel includes games without stock but excludes services and bots', () 
 test('home highlights keep games visible when stock runs out', () => {
  const games=[product('sold','Steam','key',0),product('available'),product('other','Xbox')];
  assert.deepEqual(categoryHighlights(games,'Steam').map(item=>item.id),['sold','available']);
+});
+
+test('upcoming products stay in their own category and out of the carousel', () => {
+ const products=[product('ready'),{...product('soon'),coming_soon:1}];
+ assert.deepEqual(categoryHighlights(products,'Steam').map(item=>item.id),['ready']);
+ assert.deepEqual(categoryHighlights(products,'Em breve').map(item=>item.id),['soon']);
+ assert.deepEqual(selectCarouselGames(products).map(item=>item.id),['ready']);
 });
 
 test('carousel changes its selection on reload when more games are available than slides', () => {

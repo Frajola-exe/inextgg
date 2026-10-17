@@ -37,6 +37,25 @@ function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
  return {db,body,post,state,calls};
 }
 function adminAction(body){return admin.POST(new Request('https://store.test/api/admin',{method:'POST',headers:{origin:'https://store.test','content-type':'application/json'},body:JSON.stringify(body)}));}
+test('upcoming products appear in the store but cannot enter checkout',async()=>{
+ const s=setup();
+ s.db.exec("UPDATE products SET coming_soon=1 WHERE id='p'");
+ const catalog=await (await store.GET()).json();
+ assert.equal(catalog.products[0].coming_soon,1);
+ const response=await s.post();
+ assert.equal(response.status,400);
+ assert.equal(s.db.prepare('SELECT COUNT(*) n FROM orders').get().n,0);
+ assert.equal(s.calls.length,0);
+});
+test('admin can announce a product without a price and release it when ready',async()=>{
+ const s=setup();
+ const product={id:'future',name:'Future game',product_type:'key',key_type:'steam',price_mode:'fixed',category:'Steam',description:'Soon',image:'',price:0,old_price:0,active:1,automatic:1,coming_soon:1,variants:[]};
+ assert.equal((await adminAction({action:'product',product})).status,200);
+ assert.equal(s.db.prepare("SELECT coming_soon FROM products WHERE id='future'").get().coming_soon,1);
+ assert.equal((await adminAction({action:'product',product:{...product,coming_soon:0}})).status,400);
+ assert.equal((await adminAction({action:'product',product:{...product,coming_soon:0,price:1000}})).status,200);
+ assert.equal(s.db.prepare("SELECT coming_soon,price FROM products WHERE id='future'").get().coming_soon,0);
+});
 test('key types stay aligned with platform, stock and delivery',async()=>{
  for(const [type,category] of [['steam','Steam'],['xbox','Xbox'],['psn','PlayStation']]){
   const s=setup();
