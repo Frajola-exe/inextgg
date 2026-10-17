@@ -1,6 +1,6 @@
 # INEXT — loja de keys digitais
 
-Loja responsiva com identidade visual fornecida, categorias Steam, PlayStation, Xbox e Outros, busca, favoritos locais, carrinho, Pix e painel administrativo em `/admin`.
+Loja responsiva com identidade visual fornecida, categorias Steam, PlayStation, Xbox e Serviços, busca, favoritos locais, carrinho, Pix e painel administrativo em `/admin`.
 
 ## Stack
 
@@ -74,7 +74,7 @@ A quantidade define o máximo de keys que podem ser importadas; a vitrine mostra
 apenas as keys realmente disponíveis. Produtos de key já cadastrados sem versões
 continuam com o estoque antigo.
 
-Bots e serviços em **Outros** também aceitam várias opções no mesmo produto.
+Bots e serviços em **Serviços** também aceitam várias opções no mesmo produto.
 No painel, informe o nome e o preço de cada opção; se o preço for negociável,
 cada opção é identificada no pedido de orçamento. Essas opções não usam estoque
 de keys. Em PostgreSQL/Supabase já existente, aplique
@@ -95,6 +95,11 @@ deploy. O administrador pode marcar um produto como “Em breve”; ele aparece
 na categoria `/categoria/em-breve` sem preço nem compra. Desmarque a opção
 quando o produto estiver pronto para venda. Produtos existentes permanecem
 disponíveis conforme o status anterior.
+
+Para reunir serviços digitais e bots Discord na categoria Serviços, aplique
+`db/services-category-migration.sql` em PostgreSQL/Supabase ou
+`drizzle/0006_services_category.sql` em D1 antes do deploy. Os tipos `service`
+e `bot` passam a ser subcategorias de Serviços.
 
 As reservas usam transações e uma trava compartilhada entre instâncias do servidor.
 Essa trava serializa as gravações e pode limitar o volume de pedidos simultâneos.

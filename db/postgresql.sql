@@ -18,7 +18,11 @@ CREATE TABLE products (
   active integer NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
   automatic integer NOT NULL DEFAULT 1 CHECK (automatic IN (0, 1)),
   deleted integer NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
-  coming_soon integer NOT NULL DEFAULT 0 CHECK (coming_soon IN (0, 1))
+  coming_soon integer NOT NULL DEFAULT 0 CHECK (coming_soon IN (0, 1)),
+  CONSTRAINT products_category_type_check CHECK (
+    (product_type = 'key' AND category IN ('Steam', 'PlayStation', 'Xbox')) OR
+    (product_type IN ('service', 'bot') AND category = 'Serviços')
+  )
 );
 
 CREATE TABLE orders (
