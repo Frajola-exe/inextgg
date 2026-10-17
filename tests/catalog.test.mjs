@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { matchesCategory, otherSubcategories } from '../lib/catalog.ts';
+import { available, matchesCategory, otherSubcategories } from '../lib/catalog.ts';
 
 test('Outros mostra serviços digitais e bots Discord em suas subcategorias', () => {
  const service={category:'Outros',product_type:'service'};
@@ -12,4 +12,11 @@ test('Outros mostra serviços digitais e bots Discord em suas subcategorias', ()
  assert.deepEqual([service,bot,key,steam].filter(p=>matchesCategory(p,'Outros','service')),[service]);
  assert.deepEqual([service,bot,key,steam].filter(p=>matchesCategory(p,'Outros','bot')),[bot]);
  assert.deepEqual([service,bot,key,steam].filter(p=>matchesCategory(p,'Steam')),[steam]);
+});
+
+test('Em breve bloqueia compras mesmo com estoque e preço definidos', () => {
+ const upcoming={category:'Steam',product_type:'key',stock:3,coming_soon:1};
+ assert.equal(matchesCategory(upcoming,'Em breve'),true);
+ assert.equal(matchesCategory(upcoming,'Steam'),false);
+ assert.equal(available(upcoming),false);
 });

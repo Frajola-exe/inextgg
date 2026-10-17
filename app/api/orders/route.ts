@@ -28,7 +28,7 @@ export async function POST(request:Request) {
   const requestKey=`${user.userId}:${body.requestKey}`;
   let order=await db().prepare("SELECT * FROM orders WHERE request_key=?").bind(requestKey).first<any>();
   if(!order) {
-   const products=await Promise.all(body.items.map(i=>db().prepare("SELECT * FROM products WHERE id=? AND active=1 AND deleted=0").bind(i.id).first<any>()));
+   const products=await Promise.all(body.items.map(i=>db().prepare("SELECT * FROM products WHERE id=? AND active=1 AND deleted=0 AND coming_soon=0").bind(i.id).first<any>()));
    if(products.some(p=>!p)) throw new Error("Produto indisponível.");
    if(products.some((p,i)=>p.price_mode!=="fixed" || p.price<1 || (p.product_type!=="key" && body.items[i].quantity!==1))) throw new Error("Produto indisponível para compra direta.");
    const variants=await Promise.all(body.items.map((i,index)=>db().prepare("SELECT id,name,price FROM product_variants WHERE product_id=? AND active=1 AND id=?").bind(i.id,i.variantId||"").first<any>()));

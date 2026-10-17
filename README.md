@@ -89,6 +89,13 @@ Xbox como XBOX KEY e PlayStation como PSN KEY. No painel, selecione o tipo de ke
 ao cadastrar o produto; o estoque e a entrega continuam vinculados a esse produto.
 Um produto com keys importadas não pode mudar de tipo.
 
+Para a vitrine **Em breve**, aplique `db/coming-soon-migration.sql` em uma loja
+PostgreSQL/Supabase existente ou `drizzle/0005_coming_soon.sql` em D1 antes do
+deploy. O administrador pode marcar um produto como “Em breve”; ele aparece
+na categoria `/categoria/em-breve` sem preço nem compra. Desmarque a opção
+quando o produto estiver pronto para venda. Produtos existentes permanecem
+disponíveis conforme o status anterior.
+
 As reservas usam transações e uma trava compartilhada entre instâncias do servidor.
 Essa trava serializa as gravações e pode limitar o volume de pedidos simultâneos.
 
