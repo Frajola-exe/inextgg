@@ -14,10 +14,18 @@ const product=z.object({id:z.string().optional(),name:z.string().min(2).max(120)
  if(new Set(p.variants.map(v=>v.name.toLocaleLowerCase("pt-BR"))).size!==p.variants.length) ctx.addIssue({code:"custom",message:"Nomes de versões devem ser únicos.",path:["variants"]});
  if(new Set(p.variants.map(v=>v.id).filter(Boolean)).size!==p.variants.filter(v=>v.id).length) ctx.addIssue({code:"custom",message:"Versões duplicadas.",path:["variants"]});
 });
-export async function GET() {
+export async function GET(request?:Request) {
  try {
   const user=await identity(true);
   await reconcileInventory();
+  const keysProductId=request && new URL(request.url).searchParams.get("keysProductId");
+  if(keysProductId) {
+   const id=z.string().min(1).parse(keysProductId);
+   const product=await db().prepare("SELECT id FROM products WHERE id=? AND deleted=0 AND product_type='key'").bind(id).first();
+   if(!product) throw new Error("Produto não encontrado.");
+   const available=await db().prepare("SELECT k.id,k.code,k.variant_id,v.name variant_name FROM keys k LEFT JOIN product_variants v ON v.id=k.variant_id WHERE k.product_id=? AND k.order_id IS NULL ORDER BY v.name,k.code").bind(id).all();
+   return Response.json({keys:available.results},{headers:{"Cache-Control":"private, no-store"}});
+  }
   const products=await db().prepare("SELECT p.*, (SELECT COUNT(*) FROM keys k WHERE k.product_id=p.id AND k.order_id IS NULL) stock, (SELECT COUNT(*) FROM keys k JOIN orders o ON o.id=k.order_id WHERE k.product_id=p.id AND o.delivered_at IS NULL) reserved FROM products p WHERE deleted=0").all();
   const variants=await db().prepare("SELECT v.*, (SELECT COUNT(*) FROM keys k WHERE k.variant_id=v.id AND k.order_id IS NULL) stock, (SELECT COUNT(*) FROM keys k WHERE k.variant_id=v.id) imported FROM product_variants v WHERE active=1 ORDER BY name").all();
   const orders=await db().prepare("SELECT id,email,items,total,status,created_at,paid_at,delivered_at FROM orders ORDER BY created_at DESC LIMIT 5000").all();
@@ -69,6 +77,10 @@ export async function POST(request:Request) {
     if((count?.n||0)+codes.length>v.quantity) throw new Error("Quantidade de keys excede o limite da versão.");
    }
    await db().batch(codes.map(code=>db().prepare("INSERT INTO keys(id,product_id,code,variant_id) VALUES(?,?,?,?)").bind(crypto.randomUUID(),id,code,variantId)));
+  } else if(body.action==="remove-key") {
+   const id=z.string().min(1).parse(body.id),productId=z.string().min(1).parse(body.productId);
+   const result=await db().prepare("DELETE FROM keys WHERE id=? AND product_id=? AND order_id IS NULL").bind(id,productId).run();
+   if(result.meta.changes!==1) throw new Error("Key indisponível para retirada. Atualize o estoque e tente novamente.");
   } else if(body.action==="settings") {
    const value=z.object({discord:z.string().url().refine(v=>v.startsWith("https://discord.gg/")||v.startsWith("https://discord.com/invite/")),whatsapp:z.union([z.literal(""),z.string().regex(/^\d{10,15}$/)]),automatic:z.boolean()}).parse(body.settings);
    await db().prepare("INSERT INTO settings(id,value) VALUES('store',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").bind(JSON.stringify(value)).run();

@@ -37,6 +37,20 @@ function setup({status='pendente',pixFailure=0,paidTotal=1000,method='pix'}={}){
  return {db,body,post,state,calls};
 }
 function adminAction(body){return admin.POST(new Request('https://store.test/api/admin',{method:'POST',headers:{origin:'https://store.test','content-type':'application/json'},body:JSON.stringify(body)}));}
+test('admin removes only the selected available key and preserves reserved keys',async()=>{
+ const s=setup();
+ s.db.exec("INSERT INTO keys(id,product_id,code) VALUES('free','p','FREE-KEY'),('reserved','p','RESERVED-KEY'); INSERT INTO orders(id,user_id,email,items,total,request_key,created_at) VALUES('order','buyer','buyer@example.com','[]',1000,'request',0); UPDATE keys SET order_id='order' WHERE id='reserved'");
+ const available=await (await admin.GET(new Request('https://store.test/api/admin?keysProductId=p'))).json();
+ assert.deepEqual(available.keys.map(key=>key.id).sort(),['free','k']);
+ assert.equal((await adminAction({action:'remove-key',id:'reserved',productId:'p'})).status,400);
+ assert.equal((await adminAction({action:'remove-key',id:'free',productId:'wrong'})).status,400);
+ assert.equal((await adminAction({action:'remove-key',id:'free',productId:'p'})).status,200);
+ assert.equal((await adminAction({action:'remove-key',id:'free',productId:'p'})).status,400);
+ assert.equal(s.db.prepare("SELECT COUNT(*) n FROM keys WHERE id='free'").get().n,0);
+ assert.equal(s.db.prepare("SELECT order_id FROM keys WHERE id='reserved'").get().order_id,'order');
+ assert.equal((await admin.GET(new Request('https://store.test/api/admin?keysProductId=missing'))).status,400);
+ s.db.close();
+});
 test('upcoming products appear in the store but cannot enter checkout',async()=>{
  const s=setup();
  s.db.exec("UPDATE products SET coming_soon=1 WHERE id='p'");
